@@ -612,7 +612,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                             animatedProps={animatedProps}
                             videoStabilizationMode="off"
                             outputOrientation="device"
-                            resizeMode="cover"
+                            resizeMode="contain"
                         />
                     </TouchableWithoutFeedback>
                 </Reanimated.View>
