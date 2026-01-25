@@ -23,7 +23,6 @@ import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
 import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename } from '../utils/StorageUtils';
 import MediaGallery from './MediaGallery';
-import { BlurView } from "@react-native-community/blur";
 import { AppState, AppStateStatus } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -70,7 +69,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     const [subSequence, setSubSequence] = useState(1);
     const [hasPermission, setHasPermission] = useState(false);
     const [isFlashing, setIsFlashing] = useState(false);
-    const [flash, setFlash] = useState<'off' | 'on' | 'auto'>('off');
+    const [flash, setFlash] = useState<'off' | 'on' | 'auto' | 'always'>('off');
     const [zoom, setZoom] = useState(1);
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
@@ -186,7 +185,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 setTimeout(() => setIsFlashing(false), 100);
 
                 const photo = await camera.current.takePhoto({
-                    flash: flash === 'auto' ? 'auto' : flash === 'on' ? 'on' : 'off',
+                    flash: flash === 'always' ? 'off' : flash === 'auto' ? 'auto' : flash === 'on' ? 'on' : 'off',
                 });
 
                 const targetSeq = retakeTarget?.sequence ?? sequence;
@@ -344,7 +343,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
             </TouchableOpacity>
 
             <TouchableOpacity
-                onPress={() => setFlash(f => (f === 'off' ? 'on' : f === 'on' ? 'auto' : 'off'))}
+                onPress={() => setFlash(f => (f === 'off' ? 'on' : f === 'on' ? 'auto' : f === 'auto' ? 'always' : 'off'))}
                 style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
             >
                 {renderIcon('flash', flash !== 'off')}
@@ -621,6 +620,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 photo={true}
                                 video={true}
                                 audio={true}
+                                torch={flash === 'always' ? 'on' : 'off'}
                                 // codeScanner={codeScanner}
                                 animatedProps={animatedProps}
                                 videoStabilizationMode="off"
