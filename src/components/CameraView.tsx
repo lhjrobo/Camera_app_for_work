@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCodeScanner } from 'react-native-vision-camera';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Reanimated, { useSharedValue, useAnimatedProps, runOnJS } from 'react-native-reanimated';
+import Reanimated, { useSharedValue, useAnimatedProps, runOnJS, withTiming, useAnimatedStyle } from 'react-native-reanimated';
 import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
 import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename } from '../utils/StorageUtils';
@@ -32,17 +32,100 @@ interface Props {
     currentFolder: { name: string; path: string };
     onOpenFolders: () => void;
     onRenameFolder: (newName: string) => Promise<void>;
+    shutterPositions: {
+        portrait: { x: number; y: number };
+        landscape: { x: number; y: number };
+    };
+    onShutterPositionChange: (pos: { x: number; y: number }, mode: 'portrait' | 'landscape') => void;
 }
 
 const { ShutterModule } = NativeModules;
 
-const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFolder }) => {
+const DraggableShutterButton = ({
+    onPress,
+    mode,
+    isRecording,
+    initialPos,
+    onPositionChange,
+}: {
+    onPress: () => void;
+    mode: 'photo' | 'video';
+    isRecording: boolean;
+    initialPos: { x: number; y: number };
+    onPositionChange: (pos: { x: number; y: number }) => void;
+}) => {
+    const translateX = useSharedValue(initialPos.x);
+    const translateY = useSharedValue(initialPos.y);
+    const startX = useSharedValue(0);
+    const startY = useSharedValue(0);
+    const isDragging = useSharedValue(false);
+    const scale = useSharedValue(1);
+
+    // Sync shared values when initialPos changes (e.g. orientation switch)
+    useEffect(() => {
+        translateX.value = initialPos.x;
+        translateY.value = initialPos.y;
+    }, [initialPos.x, initialPos.y, translateX, translateY]);
+
+    const panGesture = Gesture.Pan()
+        .activateAfterLongPress(200) // Reduced to 200ms for better responsiveness
+        .onStart(() => {
+            isDragging.value = true;
+            scale.value = withTiming(1.2);
+            startX.value = translateX.value;
+            startY.value = translateY.value;
+        })
+        .onUpdate((e) => {
+            translateX.value = startX.value + e.translationX;
+            translateY.value = startY.value + e.translationY;
+        })
+        .onEnd(() => {
+            isDragging.value = false;
+            scale.value = withTiming(1);
+            runOnJS(onPositionChange)({ x: translateX.value, y: translateY.value });
+        });
+
+    const tapGesture = Gesture.Tap()
+        .onEnd(() => {
+            runOnJS(onPress)();
+        });
+
+    // Race the gestures so tap fires quickly if not held long enough for pan
+    const composed = Gesture.Race(panGesture, tapGesture);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: translateX.value },
+            { translateY: translateY.value },
+            { scale: scale.value }
+        ],
+        zIndex: isDragging.value ? 100 : 1,
+        opacity: withTiming(isDragging.value ? 0.8 : 1)
+    }));
+
+    return (
+        <GestureDetector gesture={composed}>
+            <Reanimated.View style={[styles.captureButton, mode === 'video' && styles.videoButton, animatedStyle]}>
+                {isRecording && <View style={styles.recordingIndicator} />}
+            </Reanimated.View>
+        </GestureDetector>
+    );
+};
+
+const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFolder, shutterPositions, onShutterPositionChange }) => {
     const isRoot = currentFolder.path === BASE_DIR;
     const insets = useSafeAreaInsets();
     const camera = useRef<Camera>(null);
     const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>('back');
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [showDeviceList, setShowDeviceList] = useState(false);
+
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
+
+    const updateShutterPosition = useCallback((pos: { x: number; y: number }) => {
+        onShutterPositionChange(pos, isLandscape ? 'landscape' : 'portrait');
+    }, [isLandscape, onShutterPositionChange]);
 
     const devices = useCameraDevices();
     const defaultDevice = useCameraDevice(cameraPosition);
@@ -105,8 +188,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         zoom: zoomShared.value,
     }));
 
-    const { width, height } = useWindowDimensions();
-    const isLandscape = width > height;
+
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
@@ -773,12 +855,13 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 </TouchableOpacity>
                             </View>
 
-                            <TouchableOpacity
-                                style={[styles.captureButton, mode === 'video' && styles.videoButton]}
+                            <DraggableShutterButton
                                 onPress={mode === 'photo' ? takePhoto : toggleRecording}
-                            >
-                                {isRecording && <View style={styles.recordingIndicator} />}
-                            </TouchableOpacity>
+                                mode={mode}
+                                isRecording={isRecording}
+                                initialPos={isLandscape ? shutterPositions.landscape : shutterPositions.portrait}
+                                onPositionChange={updateShutterPosition}
+                            />
 
                             <View style={[styles.rightActionContainer, !isLandscape && styles.rightActionContainerPortrait]}>
                                 {!isLandscape && renderSettingsGrid()}

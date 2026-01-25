@@ -17,6 +17,13 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 const App = () => {
   const [currentFolder, setCurrentFolder] = useState<{ name: string; path: string } | null>(null);
   const [showFolderSelector, setShowFolderSelector] = useState(false);
+  const [shutterPositions, setShutterPositions] = useState<{
+    portrait: { x: number; y: number };
+    landscape: { x: number; y: number };
+  }>({
+    portrait: { x: 0, y: 0 },
+    landscape: { x: 0, y: 0 }
+  });
 
   useEffect(() => {
     const setup = async () => {
@@ -67,6 +74,13 @@ const App = () => {
               currentFolder={currentFolder}
               onOpenFolders={() => setShowFolderSelector(true)}
               onRenameFolder={handleFolderRename}
+              shutterPositions={shutterPositions}
+              onShutterPositionChange={(pos, mode) => {
+                setShutterPositions(prev => ({
+                  ...prev,
+                  [mode]: pos
+                }));
+              }}
             />
           )}
         </View>
