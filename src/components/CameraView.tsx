@@ -687,6 +687,138 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         );
     }
 
+    const renderPortraitCenterStack = () => (
+        <View style={styles.portraitCenterStack}>
+            {/* Top: Timer */}
+            {isRecording && (
+                <View style={styles.recordingTimerContainer}>
+                    <View style={styles.recordingTimerDot} />
+                    <Text style={styles.recordingTimerText}>{formatDuration(recordingDuration)}</Text>
+                </View>
+            )}
+
+            {/* Middle: Zoom */}
+            <View style={styles.zoomControlsPortrait}>
+                <TouchableOpacity onPress={() => {
+                    const newZoom = Math.max(1, zoom - 0.5);
+                    setZoom(newZoom);
+                    zoomShared.value = newZoom;
+                }} style={styles.zoomButton}>
+                    <Text style={[styles.zoomText, { fontSize: 24, marginTop: -2 }]}>-</Text>
+                </TouchableOpacity>
+                <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
+                <TouchableOpacity onPress={() => {
+                    const newZoom = Math.min(10, zoom + 0.5);
+                    setZoom(newZoom);
+                    zoomShared.value = newZoom;
+                }} style={styles.zoomButton}>
+                    <Text style={styles.zoomText}>+</Text>
+                </TouchableOpacity>
+            </View>
+            {/* Bottom: Toggle */}
+            <View style={styles.modeToggleContainer}>
+                <View style={[
+                    styles.modeIndicator,
+                    mode === 'video' && styles.modeIndicatorVideo
+                ]} />
+                <TouchableOpacity
+                    onPress={() => setMode('photo')}
+                    style={styles.modeToggleButton}
+                >
+                    <Text style={[styles.modeToggleText, mode === 'photo' && styles.activeModeToggleText]}>PHOTO</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setMode('video')}
+                    style={styles.modeToggleButton}
+                >
+                    <Text style={[styles.modeToggleText, mode === 'video' && styles.activeModeToggleText]}>VIDEO</Text>
+                </TouchableOpacity>
+            </View>
+
+        </View>
+    );
+
+    const renderPortraitControls = () => (
+        <View style={styles.actionRow}>
+            <View style={styles.leftActionContainer}>
+                <TouchableOpacity
+                    style={styles.thumbnailButton}
+                    onPress={() => setShowGallery(true)}
+                >
+                    {lastPhoto ? (
+                        <Image source={{ uri: `file://${lastPhoto}` }} style={styles.thumbnailImage} />
+                    ) : (
+                        <View style={styles.thumbnailPlaceholder} />
+                    )}
+                </TouchableOpacity>
+            </View>
+
+            <DraggableShutterButton
+                onPress={mode === 'photo' ? takePhoto : toggleRecording}
+                mode={mode}
+                isRecording={isRecording}
+                initialPos={shutterPositions.portrait}
+                onPositionChange={updateShutterPosition}
+            />
+
+            <View style={[styles.rightActionContainer, styles.rightActionContainerPortrait]}>
+                {renderSettingsGrid()}
+            </View>
+        </View>
+    );
+
+    const renderLandscapeControls = () => (
+        <View style={styles.actionRowLandscape}>
+            {/* Top: Mode Toggle */}
+            <View style={styles.landscapeGridItem}>
+                <View style={[styles.modeToggleContainer, styles.modeToggleContainerLandscape]}>
+                    <View style={[
+                        styles.modeIndicator,
+                        styles.modeIndicatorLandscape,
+                        mode === 'video' && styles.modeIndicatorVideoLandscape
+                    ]} />
+                    <TouchableOpacity
+                        onPress={() => setMode('photo')}
+                        style={[styles.modeToggleButton, styles.modeToggleButtonLandscape]}
+                    >
+                        <Text style={[styles.modeToggleText, mode === 'photo' && styles.activeModeToggleText]}>PHOTO</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setMode('video')}
+                        style={[styles.modeToggleButton, styles.modeToggleButtonLandscape]}
+                    >
+                        <Text style={[styles.modeToggleText, mode === 'video' && styles.activeModeToggleText]}>VIDEO</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            {/* Middle: Shutter Button */}
+            <View style={styles.landscapeGridItem}>
+                <DraggableShutterButton
+                    onPress={mode === 'photo' ? takePhoto : toggleRecording}
+                    mode={mode}
+                    isRecording={isRecording}
+                    initialPos={shutterPositions.landscape}
+                    onPositionChange={updateShutterPosition}
+                />
+            </View>
+
+            {/* Bottom: Gallery Button */}
+            <View style={styles.landscapeGridItem}>
+                <TouchableOpacity
+                    style={styles.thumbnailButton}
+                    onPress={() => setShowGallery(true)}
+                >
+                    {lastPhoto ? (
+                        <Image source={{ uri: `file://${lastPhoto}` }} style={styles.thumbnailImage} />
+                    ) : (
+                        <View style={styles.thumbnailPlaceholder} />
+                    )}
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#000" hidden={!showGallery} />
@@ -760,23 +892,33 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                     </SafeAreaView>
 
 
-                    <View style={[styles.zoomControls, isLandscape && styles.zoomControlsLandscape]}>
-                        <TouchableOpacity onPress={() => {
-                            const newZoom = Math.max(1, zoom - 0.5);
-                            setZoom(newZoom);
-                            zoomShared.value = newZoom;
-                        }} style={styles.zoomButton}>
-                            <Text style={[styles.zoomText, { fontSize: 24, marginTop: -2 }]}>-</Text>
-                        </TouchableOpacity>
-                        <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
-                        <TouchableOpacity onPress={() => {
-                            const newZoom = Math.min(10, zoom + 0.5);
-                            setZoom(newZoom);
-                            zoomShared.value = newZoom;
-                        }} style={styles.zoomButton}>
-                            <Text style={styles.zoomText}>+</Text>
-                        </TouchableOpacity>
-                    </View>
+                    {isLandscape && (
+                        <View style={styles.landscapeSecondaryContainer}>
+                            {isRecording && (
+                                <View style={styles.recordingTimerContainer}>
+                                    <View style={styles.recordingTimerDot} />
+                                    <Text style={styles.recordingTimerText}>{formatDuration(recordingDuration)}</Text>
+                                </View>
+                            )}
+                            <View style={styles.zoomVerticalStack}>
+                                <TouchableOpacity onPress={() => {
+                                    const newZoom = Math.min(10, zoom + 0.5);
+                                    setZoom(newZoom);
+                                    zoomShared.value = newZoom;
+                                }} style={styles.zoomButton}>
+                                    <Text style={styles.zoomText}>+</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
+                                <TouchableOpacity onPress={() => {
+                                    const newZoom = Math.max(1, zoom - 0.5);
+                                    setZoom(newZoom);
+                                    zoomShared.value = newZoom;
+                                }} style={styles.zoomButton}>
+                                    <Text style={[styles.zoomText, { fontSize: 24, marginTop: -2 }]}>-</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
 
                     <View style={[
                         styles.controls,
@@ -813,60 +955,9 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                             )}
                         </View>
 
-                        <View style={[styles.modeToggleContainer, isLandscape && styles.modeToggleContainerLandscape]}>
-                            <View style={[
-                                styles.modeIndicator,
-                                mode === 'video' && styles.modeIndicatorVideo,
-                                isLandscape && styles.modeIndicatorLandscape,
-                                isLandscape && mode === 'video' && styles.modeIndicatorVideoLandscape
-                            ]} />
-                            <TouchableOpacity
-                                onPress={() => setMode('photo')}
-                                style={[styles.modeToggleButton, isLandscape && styles.modeToggleButtonLandscape]}
-                            >
-                                <Text style={[styles.modeToggleText, mode === 'photo' && styles.activeModeToggleText]}>PHOTO</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => setMode('video')}
-                                style={[styles.modeToggleButton, isLandscape && styles.modeToggleButtonLandscape]}
-                            >
-                                <Text style={[styles.modeToggleText, mode === 'video' && styles.activeModeToggleText]}>VIDEO</Text>
-                            </TouchableOpacity>
-                        </View>
+                        {!isLandscape && renderPortraitCenterStack()}
 
-                        {isRecording && (
-                            <View style={styles.recordingTimerContainer}>
-                                <View style={styles.recordingTimerDot} />
-                                <Text style={styles.recordingTimerText}>{formatDuration(recordingDuration)}</Text>
-                            </View>
-                        )}
-
-                        <View style={styles.actionRow}>
-                            <View style={styles.leftActionContainer}>
-                                <TouchableOpacity
-                                    style={styles.thumbnailButton}
-                                    onPress={() => setShowGallery(true)}
-                                >
-                                    {lastPhoto ? (
-                                        <Image source={{ uri: `file://${lastPhoto}` }} style={styles.thumbnailImage} />
-                                    ) : (
-                                        <View style={styles.thumbnailPlaceholder} />
-                                    )}
-                                </TouchableOpacity>
-                            </View>
-
-                            <DraggableShutterButton
-                                onPress={mode === 'photo' ? takePhoto : toggleRecording}
-                                mode={mode}
-                                isRecording={isRecording}
-                                initialPos={isLandscape ? shutterPositions.landscape : shutterPositions.portrait}
-                                onPositionChange={updateShutterPosition}
-                            />
-
-                            <View style={[styles.rightActionContainer, !isLandscape && styles.rightActionContainerPortrait]}>
-                                {!isLandscape && renderSettingsGrid()}
-                            </View>
-                        </View>
+                        {isLandscape ? renderLandscapeControls() : renderPortraitControls()}
                     </View>
                 </View>
             )}
@@ -1261,7 +1352,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 100,
         marginBottom: 0,
-        marginRight: 20,
+        marginRight: 0,
     },
     modeIndicator: {
         position: 'absolute',
@@ -1312,6 +1403,18 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         width: '100%',
         height: 100,
+    },
+    actionRowLandscape: {
+        flexDirection: 'column',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 60,
+        gap: 40,
+    },
+    landscapeGridItem: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     leftActionContainer: {
         position: 'absolute',
@@ -1498,6 +1601,38 @@ const styles = StyleSheet.create({
         right: 170,
         flexDirection: 'column-reverse',
         transform: [{ translateY: -50 }],
+    },
+    landscapeSecondaryContainer: {
+        position: 'absolute',
+        right: 170,
+        top: '50%',
+        transform: [{ translateY: -50 }],
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 20,
+        zIndex: 10,
+    },
+    zoomVerticalStack: {
+        flexDirection: 'column',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        alignItems: 'center',
+        paddingVertical: 10,
+        width: 60,
+    },
+    portraitCenterStack: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 20,
+        gap: 15,
+        width: '100%',
+    },
+    zoomControlsPortrait: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        paddingHorizontal: 10,
     },
     zoomButton: {
         width: 40,

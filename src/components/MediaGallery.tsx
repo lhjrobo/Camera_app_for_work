@@ -10,6 +10,7 @@ import {
     Dimensions,
     Alert,
     SafeAreaView,
+    useWindowDimensions,
 } from 'react-native';
 import Video from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,9 +19,8 @@ import type { ReadDirItem } from 'react-native-fs';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
-const COLUMN_COUNT = 3;
-const ITEM_SIZE = width / COLUMN_COUNT;
+const COLUMN_COUNT_PORTRAIT = 3;
+const COLUMN_COUNT_LANDSCAPE = 6;
 
 interface Props {
     folderPath: string;
@@ -101,6 +101,10 @@ const ZoomableImage = ({ uri }: { uri: string }) => {
 };
 
 const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
+    const numColumns = isLandscape ? COLUMN_COUNT_LANDSCAPE : COLUMN_COUNT_PORTRAIT;
+    const itemSize = width / numColumns;
     const insets = useSafeAreaInsets();
     const [photos, setPhotos] = useState<ReadDirItem[]>([]);
     const [selectedPhoto, setSelectedPhoto] = useState<ReadDirItem | null>(null);
@@ -219,6 +223,7 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
         <TouchableOpacity
             style={[
                 styles.itemContainer,
+                { width: itemSize, height: itemSize },
                 selectionMode && selectedItems.has(item.path) && styles.selectedItemContainer
             ]}
             onPress={() => handlePress(item)}
@@ -291,7 +296,8 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                 data={photos}
                 renderItem={renderItem}
                 keyExtractor={(item) => item.path}
-                numColumns={COLUMN_COUNT}
+                numColumns={numColumns}
+                key={numColumns} // Force re-render when column count changes
                 contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(20, insets.bottom) }]}
             />
 
@@ -408,8 +414,6 @@ const styles = StyleSheet.create({
         paddingBottom: 20,
     },
     itemContainer: {
-        width: ITEM_SIZE,
-        height: ITEM_SIZE,
         padding: 1,
     },
     thumbnail: {

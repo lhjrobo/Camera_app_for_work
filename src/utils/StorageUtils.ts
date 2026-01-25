@@ -111,7 +111,8 @@ export const listPhotos = async (folderPath: string) => {
             .filter(f => {
                 if (!f.isFile()) return false;
                 const name = f.name.toLowerCase();
-                return name.endsWith('.jpg') || name.endsWith('.mp4');
+                return name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') ||
+                    name.endsWith('.mp4') || name.endsWith('.mov');
             })
             .sort((a, b) => (b.mtime?.getTime() || 0) - (a.mtime?.getTime() || 0));
     } catch (e) {

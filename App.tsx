@@ -7,6 +7,8 @@ import {
   Text,
   TouchableOpacity,
   Alert,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
 import { initStorage, createNewSessionFolder, renameFolder, BASE_DIR } from './src/utils/StorageUtils';
 import CameraView from './src/components/CameraView';
@@ -26,7 +28,28 @@ const App = () => {
   });
 
   useEffect(() => {
+    const requestPermissions = async () => {
+      if (Platform.OS === 'android') {
+        try {
+          if (Platform.Version >= 33) {
+            await PermissionsAndroid.requestMultiple([
+              PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+              PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+            ]);
+          } else {
+            await PermissionsAndroid.requestMultiple([
+              PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+              PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+            ]);
+          }
+        } catch (err) {
+          console.warn(err);
+        }
+      }
+    };
+
     const setup = async () => {
+      await requestPermissions();
       await initStorage();
       // Initially, store directly in WorkPhotos root
       setCurrentFolder({ name: 'WorkPhotos', path: BASE_DIR });
