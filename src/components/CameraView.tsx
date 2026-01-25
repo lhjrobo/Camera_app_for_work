@@ -23,6 +23,8 @@ import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
 import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename } from '../utils/StorageUtils';
 import MediaGallery from './MediaGallery';
+import { BlurView } from "@react-native-community/blur";
+import { AppState, AppStateStatus } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ReanimatedCamera = Reanimated.createAnimatedComponent(Camera);
@@ -45,6 +47,16 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
 
     const devices = useCameraDevices();
     const defaultDevice = useCameraDevice(cameraPosition);
+    const [isForeground, setIsForeground] = useState(true);
+
+    useEffect(() => {
+        const onChange = (state: AppStateStatus) => {
+            setIsForeground(state === 'active');
+        };
+        const listener = AppState.addEventListener('change', onChange);
+        return () => listener.remove();
+    }, []);
+
     const device = selectedDeviceId
         ? devices.find(d => d.id === selectedDeviceId)
         : defaultDevice;
@@ -600,20 +612,23 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
             <GestureDetector gesture={pinchGesture}>
                 <Reanimated.View style={StyleSheet.absoluteFill}>
                     <TouchableWithoutFeedback onPress={handleFocus}>
-                        <ReanimatedCamera
-                            ref={camera}
-                            style={StyleSheet.absoluteFill}
-                            device={device}
-                            isActive={true}
-                            photo={true}
-                            video={true}
-                            audio={true}
-                            // codeScanner={codeScanner}
-                            animatedProps={animatedProps}
-                            videoStabilizationMode="off"
-                            outputOrientation="device"
-                            resizeMode="contain"
-                        />
+                        <View style={StyleSheet.absoluteFill}>
+                            <ReanimatedCamera
+                                ref={camera}
+                                style={StyleSheet.absoluteFill}
+                                device={device}
+                                isActive={isForeground && !showGallery}
+                                photo={true}
+                                video={true}
+                                audio={true}
+                                // codeScanner={codeScanner}
+                                animatedProps={animatedProps}
+                                videoStabilizationMode="off"
+                                outputOrientation="device"
+                                resizeMode="contain"
+                            />
+
+                        </View>
                     </TouchableWithoutFeedback>
                 </Reanimated.View>
             </GestureDetector>
