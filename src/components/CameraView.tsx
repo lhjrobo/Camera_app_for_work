@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     StyleSheet,
@@ -15,14 +15,21 @@ import {
     TextInput,
     Alert,
     NativeModules,
+    StyleProp,
+    ViewStyle,
+    DimensionValue,
+    Platform,
+    AppState,
+    AppStateStatus,
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCodeScanner } from 'react-native-vision-camera';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Reanimated, { useSharedValue, useAnimatedProps, runOnJS } from 'react-native-reanimated';
+import Reanimated, { useSharedValue, useAnimatedProps, runOnJS, withTiming, useAnimatedStyle } from 'react-native-reanimated';
 import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
-import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename } from '../utils/StorageUtils';
+import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename, requestStoragePermission } from '../utils/StorageUtils';
 import MediaGallery from './MediaGallery';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ReanimatedCamera = Reanimated.createAnimatedComponent(Camera);
@@ -31,11 +38,87 @@ interface Props {
     currentFolder: { name: string; path: string };
     onOpenFolders: () => void;
     onRenameFolder: (newName: string) => Promise<void>;
+    shutterPositions: {
+        portrait: { x: number; y: number };
+        landscape: { x: number; y: number };
+    };
+    onShutterPositionChange: (pos: { x: number; y: number }, mode: 'portrait' | 'landscape') => void;
 }
 
 const { ShutterModule } = NativeModules;
 
-const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFolder }) => {
+const DraggableShutterButton = ({
+    onPress,
+    mode,
+    isRecording,
+    initialPos,
+    onPositionChange,
+}: {
+    onPress: () => void;
+    mode: 'photo' | 'video';
+    isRecording: boolean;
+    initialPos: { x: number; y: number };
+    onPositionChange: (pos: { x: number; y: number }) => void;
+}) => {
+    const translateX = useSharedValue(initialPos.x);
+    const translateY = useSharedValue(initialPos.y);
+    const startX = useSharedValue(0);
+    const startY = useSharedValue(0);
+    const isDragging = useSharedValue(false);
+    const scale = useSharedValue(1);
+
+    // Sync shared values when initialPos changes (e.g. orientation switch)
+    useEffect(() => {
+        translateX.value = initialPos.x;
+        translateY.value = initialPos.y;
+    }, [initialPos.x, initialPos.y, translateX, translateY]);
+
+    const panGesture = Gesture.Pan()
+        .activateAfterLongPress(200) // Reduced to 200ms for better responsiveness
+        .onStart(() => {
+            isDragging.value = true;
+            scale.value = withTiming(1.2);
+            startX.value = translateX.value;
+            startY.value = translateY.value;
+        })
+        .onUpdate((e) => {
+            translateX.value = startX.value + e.translationX;
+            translateY.value = startY.value + e.translationY;
+        })
+        .onEnd(() => {
+            isDragging.value = false;
+            scale.value = withTiming(1);
+            runOnJS(onPositionChange)({ x: translateX.value, y: translateY.value });
+        });
+
+    const tapGesture = Gesture.Tap()
+        .onEnd(() => {
+            runOnJS(onPress)();
+        });
+
+    // Race the gestures so tap fires quickly if not held long enough for pan
+    const composed = Gesture.Race(panGesture, tapGesture);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: translateX.value },
+            { translateY: translateY.value },
+            { scale: scale.value }
+        ],
+        zIndex: isDragging.value ? 100 : 1,
+        opacity: withTiming(isDragging.value ? 0.8 : 1)
+    }));
+
+    return (
+        <GestureDetector gesture={composed}>
+            <Reanimated.View style={[styles.captureButton, mode === 'video' && styles.videoButton, animatedStyle]}>
+                {isRecording && <View style={styles.recordingIndicator} />}
+            </Reanimated.View>
+        </GestureDetector>
+    );
+};
+
+const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFolder, shutterPositions, onShutterPositionChange }) => {
     const isRoot = currentFolder.path === BASE_DIR;
     const insets = useSafeAreaInsets();
     const camera = useRef<Camera>(null);
@@ -43,8 +126,25 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [showDeviceList, setShowDeviceList] = useState(false);
 
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
+
+    const updateShutterPosition = useCallback((pos: { x: number; y: number }) => {
+        onShutterPositionChange(pos, isLandscape ? 'landscape' : 'portrait');
+    }, [isLandscape, onShutterPositionChange]);
+
     const devices = useCameraDevices();
     const defaultDevice = useCameraDevice(cameraPosition);
+    const [isForeground, setIsForeground] = useState(true);
+
+    useEffect(() => {
+        const onChange = (state: AppStateStatus) => {
+            setIsForeground(state === 'active');
+        };
+        const listener = AppState.addEventListener('change', onChange);
+        return () => listener.remove();
+    }, []);
+
     const device = selectedDeviceId
         ? devices.find(d => d.id === selectedDeviceId)
         : defaultDevice;
@@ -54,11 +154,19 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     const [labelingMode, setLabelingMode] = useState<'single' | 'numbered-group' | 'text-group'>('single');
     const [textLabel, setTextLabel] = useState('');
     const [isEnteringLabel, setIsEnteringLabel] = useState(false);
+
+    const cameraAspectRatio = useMemo(() => {
+        if (isLandscape) {
+            return mode === 'photo' ? 4 / 3 : 16 / 9;
+        } else {
+            return mode === 'photo' ? 3 / 4 : 9 / 16;
+        }
+    }, [isLandscape, mode]);
     const [sequence, setSequence] = useState(1);
     const [subSequence, setSubSequence] = useState(1);
     const [hasPermission, setHasPermission] = useState(false);
     const [isFlashing, setIsFlashing] = useState(false);
-    const [flash, setFlash] = useState<'off' | 'on' | 'auto'>('off');
+    const [flash, setFlash] = useState<'off' | 'on' | 'auto' | 'always'>('off');
     const [zoom, setZoom] = useState(1);
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
@@ -94,8 +202,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         zoom: zoomShared.value,
     }));
 
-    const { width, height } = useWindowDimensions();
-    const isLandscape = width > height;
+
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
@@ -120,7 +227,8 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         (async () => {
             const cameraPermission = await Camera.requestCameraPermission();
             const microphonePermission = await Camera.requestMicrophonePermission();
-            setHasPermission(cameraPermission === 'granted' && microphonePermission === 'granted');
+            const storagePermission = await requestStoragePermission();
+            setHasPermission(cameraPermission === 'granted' && microphonePermission === 'granted' && storagePermission);
 
             // Load last photo and used labels from current folder
             const photos = await listPhotos(currentFolder.path);
@@ -174,7 +282,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 setTimeout(() => setIsFlashing(false), 100);
 
                 const photo = await camera.current.takePhoto({
-                    flash: flash === 'auto' ? 'auto' : flash === 'on' ? 'on' : 'off',
+                    flash: flash === 'always' ? 'off' : flash === 'auto' ? 'auto' : flash === 'on' ? 'on' : 'off',
                 });
 
                 const targetSeq = retakeTarget?.sequence ?? sequence;
@@ -294,35 +402,42 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         }
     };
 
-    const renderSettingsGrid = () => (
-        <View style={[styles.settingsGrid, !isLandscape && styles.settingsGridVertical]}>
-            {lastPhoto && !retakeTarget && (
-                <TouchableOpacity
-                    onPress={retakeLast}
-                    style={[styles.glassButton, styles.gridButton, styles.retakeGridButton, !isLandscape && styles.gridButtonVertical]}
-                >
-                    <Text style={styles.retakeGridIcon}>↺</Text>
-                    <Text style={styles.retakeGridText}>再撮影</Text>
-                </TouchableOpacity>
-            )}
-            {labelingMode !== 'single' && (
-                <TouchableOpacity
-                    onPress={nextSequence}
-                    style={[styles.glassButton, styles.gridButton, styles.nextGroupButton, !isLandscape && styles.gridButtonVertical]}
-                >
-                    <Text style={styles.nextGroupIcon}>→</Text>
-                    <Text style={styles.nextGroupText}>
-                        {labelingMode === 'text-group' ? '次ラベル' : sequence + 1}
-                    </Text>
-                </TouchableOpacity>
-            )}
-
+    const renderSettingsGrid = () => {
+        // Retake button component
+        const retakeButton = !isRoot && lastPhoto && !retakeTarget && (
             <TouchableOpacity
+                key="retake"
+                onPress={retakeLast}
+                style={[styles.glassButton, styles.gridButton, styles.retakeGridButton, !isLandscape && styles.gridButtonVertical]}
+            >
+                <Text style={styles.retakeGridIcon}>↺</Text>
+                <Text style={styles.retakeGridText}>再撮影</Text>
+            </TouchableOpacity>
+        );
+
+        // Next group button component
+        const nextGroupButton = labelingMode !== 'single' && (
+            <TouchableOpacity
+                key="nextGroup"
+                onPress={nextSequence}
+                style={[styles.glassButton, styles.gridButton, styles.nextGroupButton, !isLandscape && styles.gridButtonVertical]}
+            >
+                <Text style={styles.nextGroupIcon}>→</Text>
+                <Text style={styles.nextGroupText}>
+                    {labelingMode === 'text-group' ? '次ラベル' : sequence + 1}
+                </Text>
+            </TouchableOpacity>
+        );
+
+        // Label select button component
+        const labelSelectButton = !isRoot && (
+            <TouchableOpacity
+                key="labelSelect"
                 onPress={() => {
                     if (labelingMode === 'single') setLabelingMode('numbered-group');
                     else if (labelingMode === 'numbered-group') {
                         setLabelingMode('text-group');
-                        setIsEnteringLabel(true); // Prompt immediately when switching to text group
+                        setIsEnteringLabel(true);
                     }
                     else setLabelingMode('single');
                 }}
@@ -330,26 +445,54 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
             >
                 {renderIcon('grouped', labelingMode !== 'single')}
             </TouchableOpacity>
+        );
 
+        return (
+            <View style={[styles.settingsGrid, !isLandscape && styles.settingsGridVertical]}>
+                {isLandscape ? (
+                    // Landscape: label select, next group, retake
+                    <>{labelSelectButton}{nextGroupButton}{retakeButton}</>
+                ) : (
+                    // Portrait: retake, next group, label select (original order)
+                    <>{retakeButton}{nextGroupButton}{labelSelectButton}</>
+                )}
+            </View>
+        );
+    };
+
+    const renderTopControls = () => (
+        <View style={[
+            styles.topControlBar,
+            isLandscape && styles.topControlBarLandscape,
+            isLandscape ? {
+                // Landscape: Place in Left Pillarbox
+                left: 0, // slight offset from edge
+                right: undefined, // Clear right
+                top: 20,
+                width: 50, // Fixed width for column
+                alignItems: 'center',
+            } : {
+                // Portrait: Place in Top Letterbox
+                top: 0,
+                right: 15,
+                height: 50, // Fit within the top padding
+                alignItems: 'center',
+            }
+        ]}>
             <TouchableOpacity
-                onPress={() => setFlash(f => (f === 'off' ? 'on' : f === 'on' ? 'auto' : 'off'))}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
+                onPress={() => setFlash(f => (f === 'off' ? 'on' : f === 'on' ? 'auto' : f === 'auto' ? 'always' : 'off'))}
+                style={styles.miniIconButton}
             >
                 {renderIcon('flash', flash !== 'off')}
             </TouchableOpacity>
 
             <TouchableOpacity
                 onPress={() => setCameraPosition(p => p === 'back' ? 'front' : 'back')}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
+                onLongPress={() => setShowDeviceList(true)}
+                delayLongPress={500}
+                style={styles.miniIconButton}
             >
                 {renderIcon('switch')}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                onPress={() => setShowDeviceList(true)}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
-            >
-                {renderIcon('lenses')}
             </TouchableOpacity>
         </View>
     );
@@ -559,6 +702,43 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         setIndexWarning(null);
     };
 
+    const containerStyle = useMemo(() => {
+        if (isLandscape) {
+            return [
+                styles.cameraContainer,
+                {
+                    paddingLeft: 50, // Flush with controls (width 50)
+                    justifyContent: 'center' as const,
+                    alignItems: 'flex-start' as const,
+                }
+            ];
+        }
+        return [
+            styles.cameraContainer,
+            {
+                paddingTop: 50, // Flush with controls (height 50)
+                justifyContent: 'flex-start' as const,
+            }
+        ];
+    }, [isLandscape]);
+
+    const wrapperStyle = useMemo<StyleProp<ViewStyle>>(() => {
+        if (isLandscape) {
+            return [
+                styles.cameraWrapper,
+                {
+                    width: undefined,
+                    height: '100%' as DimensionValue,
+                    aspectRatio: cameraAspectRatio
+                }
+            ];
+        }
+        return [
+            styles.cameraWrapper,
+            { aspectRatio: cameraAspectRatio }
+        ];
+    }, [isLandscape, cameraAspectRatio]);
+
     const handleFocus = async (event: any) => {
         if (camera.current) {
             const { pageX, pageY } = event.nativeEvent;
@@ -587,6 +767,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     };
 
     if (!device || !hasPermission) {
+
         return (
             <View style={styles.container}>
                 <Text style={styles.text}>No Camera Device or Permission</Text>
@@ -594,26 +775,222 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         );
     }
 
+    const renderPortraitCenterStack = () => (
+        <View style={styles.portraitCenterStack}>
+            {/* Top: Timer */}
+            {isRecording && (
+                <View style={styles.recordingTimerContainer}>
+                    <View style={styles.recordingTimerDot} />
+                    <Text style={styles.recordingTimerText}>{formatDuration(recordingDuration)}</Text>
+                </View>
+            )}
+
+            {/* Middle: Zoom */}
+            <View style={styles.zoomControlsPortrait}>
+                <TouchableOpacity onPress={() => {
+                    const newZoom = Math.max(1, zoom - 0.5);
+                    setZoom(newZoom);
+                    zoomShared.value = newZoom;
+                }} style={styles.zoomButton}>
+                    <Text style={[styles.zoomText, { fontSize: 24, marginTop: -2 }]}>-</Text>
+                </TouchableOpacity>
+                <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
+                <TouchableOpacity onPress={() => {
+                    const newZoom = Math.min(10, zoom + 0.5);
+                    setZoom(newZoom);
+                    zoomShared.value = newZoom;
+                }} style={styles.zoomButton}>
+                    <Text style={styles.zoomText}>+</Text>
+                </TouchableOpacity>
+            </View>
+            {/* Bottom: Toggle */}
+            <View style={styles.modeToggleContainer}>
+                <View style={[
+                    styles.modeIndicator,
+                    mode === 'video' && styles.modeIndicatorVideo
+                ]} />
+                <TouchableOpacity
+                    onPress={() => setMode('photo')}
+                    style={styles.modeToggleButton}
+                >
+                    <Text style={[styles.modeToggleText, mode === 'photo' && styles.activeModeToggleText]}>PHOTO</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setMode('video')}
+                    style={styles.modeToggleButton}
+                >
+                    <Text style={[styles.modeToggleText, mode === 'video' && styles.activeModeToggleText]}>VIDEO</Text>
+                </TouchableOpacity>
+            </View>
+
+        </View>
+    );
+
+    const renderPortraitControls = () => (
+        <View style={styles.actionRow}>
+            <View style={styles.leftActionContainer}>
+                <TouchableOpacity
+                    style={styles.thumbnailButton}
+                    onPress={() => setShowGallery(true)}
+                >
+                    {lastPhoto ? (
+                        <Image source={{ uri: `file://${lastPhoto}` }} style={styles.thumbnailImage} />
+                    ) : (
+                        <View style={styles.thumbnailPlaceholder} />
+                    )}
+                </TouchableOpacity>
+            </View>
+
+            <DraggableShutterButton
+                onPress={mode === 'photo' ? takePhoto : toggleRecording}
+                mode={mode}
+                isRecording={isRecording}
+                initialPos={shutterPositions.portrait}
+                onPositionChange={updateShutterPosition}
+            />
+
+            <View style={[styles.rightActionContainer, styles.rightActionContainerPortrait]}>
+                {renderSettingsGrid()}
+            </View>
+        </View>
+    );
+
+    const renderLandscapeControls = () => (
+        <View style={styles.actionRowLandscape}>
+            {/* Top: Mode Toggle */}
+            <View style={styles.landscapeGridItem}>
+                <View style={[styles.modeToggleContainer, styles.modeToggleContainerLandscape]}>
+                    <View style={[
+                        styles.modeIndicator,
+                        styles.modeIndicatorLandscape,
+                        mode === 'video' && styles.modeIndicatorVideoLandscape
+                    ]} />
+                    <TouchableOpacity
+                        onPress={() => setMode('photo')}
+                        style={[styles.modeToggleButton, styles.modeToggleButtonLandscape]}
+                    >
+                        <Text style={[styles.modeToggleText, mode === 'photo' && styles.activeModeToggleText]}>PHOTO</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setMode('video')}
+                        style={[styles.modeToggleButton, styles.modeToggleButtonLandscape]}
+                    >
+                        <Text style={[styles.modeToggleText, mode === 'video' && styles.activeModeToggleText]}>VIDEO</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            {/* Middle: Shutter Button */}
+            <View style={styles.landscapeGridItem}>
+                <DraggableShutterButton
+                    onPress={mode === 'photo' ? takePhoto : toggleRecording}
+                    mode={mode}
+                    isRecording={isRecording}
+                    initialPos={shutterPositions.landscape}
+                    onPositionChange={updateShutterPosition}
+                />
+            </View>
+
+            {/* Bottom: Gallery Button */}
+            <View style={styles.landscapeGridItem}>
+                <TouchableOpacity
+                    style={styles.thumbnailButton}
+                    onPress={() => setShowGallery(true)}
+                >
+                    {lastPhoto ? (
+                        <Image source={{ uri: `file://${lastPhoto}` }} style={styles.thumbnailImage} />
+                    ) : (
+                        <View style={styles.thumbnailPlaceholder} />
+                    )}
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+
+
+
+
+
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#000" hidden={!showGallery} />
             <GestureDetector gesture={pinchGesture}>
-                <Reanimated.View style={StyleSheet.absoluteFill}>
+                <Reanimated.View style={containerStyle}>
                     <TouchableWithoutFeedback onPress={handleFocus}>
-                        <ReanimatedCamera
-                            ref={camera}
-                            style={StyleSheet.absoluteFill}
-                            device={device}
-                            isActive={true}
-                            photo={true}
-                            video={true}
-                            audio={true}
-                            // codeScanner={codeScanner}
-                            animatedProps={animatedProps}
-                            videoStabilizationMode="off"
-                            outputOrientation="device"
-                            resizeMode="cover"
-                        />
+                        <View style={wrapperStyle}>
+                            <ReanimatedCamera
+                                ref={camera}
+                                style={styles.camera}
+                                device={device}
+                                isActive={isForeground && !showGallery}
+                                photo={true}
+                                video={true}
+                                audio={true}
+                                torch={flash === 'always' ? 'on' : 'off'}
+                                // codeScanner={codeScanner}
+                                animatedProps={animatedProps}
+                                videoStabilizationMode="off"
+                                outputOrientation="device"
+                                resizeMode="cover"
+                            />
+
+                            {/* Next label overlay inside camera - landscape only */}
+                            {isLandscape && !isRoot && (
+                                <View style={styles.cameraInfoOverlayRight} pointerEvents="box-none">
+                                    {retakeTarget && (
+                                        <TouchableOpacity
+                                            style={styles.retakeLabel}
+                                            onPress={() => setRetakeTarget(null)}
+                                        >
+                                            <Text style={styles.retakeLabelText}>
+                                                Retaking {formatFilename(retakeTarget.sequence ?? 0, retakeTarget.subSequence, retakeTarget.textLabel).replace('.jpg', '')} ✕
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                    <TouchableOpacity
+                                        style={styles.filenameIndicator}
+                                        onPress={retakeTarget ? undefined : openIndexEditor}
+                                        disabled={!!retakeTarget}
+                                    >
+                                        <Text style={styles.filenameIndicatorText}>
+                                            Next: {formatFilename(
+                                                retakeTarget?.sequence ?? sequence,
+                                                retakeTarget ? retakeTarget.subSequence : (labelingMode !== 'single' ? subSequence : undefined),
+                                                retakeTarget ? retakeTarget.textLabel : (labelingMode === 'text-group' ? textLabel : undefined)
+                                            ).replace('.jpg', '')} ✎
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* Folder select overlay inside camera - landscape only */}
+                            {isLandscape && (
+                                <View style={styles.cameraInfoOverlayLeft} pointerEvents="box-none">
+                                    <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
+                                        <Text style={styles.folderText}>📁 {isRoot ? 'WorkPhotos' : currentFolder.name}</Text>
+                                    </TouchableOpacity>
+                                    {!isRoot && (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setNewFolderName(getFolderBaseName(currentFolder.name));
+                                                setIsRenaming(true);
+                                            }}
+                                            style={styles.editFolderButton}
+                                        >
+                                            <Text style={styles.editFolderIcon}>✎</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            )}
+
+                            {/* Label select & retake overlay inside camera - landscape only - bottom left */}
+                            {isLandscape && (
+                                <View style={styles.cameraInfoOverlayBottomLeft} pointerEvents="box-none">
+                                    {renderSettingsGrid()}
+                                </View>
+                            )}
+
+                        </View>
                     </TouchableWithoutFeedback>
                 </Reanimated.View>
             </GestureDetector>
@@ -637,49 +1014,69 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
                     <SafeAreaView style={[
                         styles.header,
-                        isLandscape && styles.headerLandscape,
-                        { paddingTop: Math.max(10, insets.top) }
+                        {
+                            // Header aligns with camera view start
+                            top: isLandscape ? 0 : 50,
+                            left: isLandscape ? 60 : 0,  // 50 (camera padding) + 10 (to match Next UI margin)
+                            paddingTop: 10,
+                            paddingHorizontal: isLandscape ? 0 : 20,  // No extra padding in landscape
+                        }
                     ]}>
-                        <View style={styles.headerLeft}>
-                            <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
-                                <Text style={styles.folderText}>📁 {isRoot ? 'WorkPhotos' : currentFolder.name}</Text>
-                            </TouchableOpacity>
-                            {!isRoot && (
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setNewFolderName(getFolderBaseName(currentFolder.name));
-                                        setIsRenaming(true);
-                                    }}
-                                    style={styles.editFolderButton}
-                                >
-                                    <Text style={styles.editFolderIcon}>✎</Text>
+                        {/* Portrait only - landscape version is in camera overlay */}
+                        {!isLandscape && (
+                            <View style={styles.headerLeft}>
+                                <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
+                                    <Text style={styles.folderText}>📁 {isRoot ? 'WorkPhotos' : currentFolder.name}</Text>
                                 </TouchableOpacity>
-                            )}
-                        </View>
+                                {!isRoot && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setNewFolderName(getFolderBaseName(currentFolder.name));
+                                            setIsRenaming(true);
+                                        }}
+                                        style={styles.editFolderButton}
+                                    >
+                                        <Text style={styles.editFolderIcon}>✎</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        )}
 
                         <View style={styles.headerRight}>
-                            {isLandscape && renderSettingsGrid()}
+                            {/* Settings grid moved to camera overlay in landscape */}
                         </View>
                     </SafeAreaView>
 
 
-                    <View style={[styles.zoomControls, isLandscape && styles.zoomControlsLandscape]}>
-                        <TouchableOpacity onPress={() => {
-                            const newZoom = Math.max(1, zoom - 0.5);
-                            setZoom(newZoom);
-                            zoomShared.value = newZoom;
-                        }} style={styles.zoomButton}>
-                            <Text style={[styles.zoomText, { fontSize: 24, marginTop: -2 }]}>-</Text>
-                        </TouchableOpacity>
-                        <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
-                        <TouchableOpacity onPress={() => {
-                            const newZoom = Math.min(10, zoom + 0.5);
-                            setZoom(newZoom);
-                            zoomShared.value = newZoom;
-                        }} style={styles.zoomButton}>
-                            <Text style={styles.zoomText}>+</Text>
-                        </TouchableOpacity>
-                    </View>
+                    {renderTopControls()}
+
+                    {isLandscape && (
+                        <View style={styles.landscapeSecondaryContainer}>
+                            {isRecording && (
+                                <View style={styles.recordingTimerContainer}>
+                                    <View style={styles.recordingTimerDot} />
+                                    <Text style={styles.recordingTimerText}>{formatDuration(recordingDuration)}</Text>
+                                </View>
+                            )}
+                            <View style={styles.zoomVerticalStack}>
+                                <TouchableOpacity onPress={() => {
+                                    const newZoom = Math.min(10, zoom + 0.5);
+                                    setZoom(newZoom);
+                                    zoomShared.value = newZoom;
+                                }} style={styles.zoomButton}>
+                                    <Text style={styles.zoomText}>+</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
+                                <TouchableOpacity onPress={() => {
+                                    const newZoom = Math.max(1, zoom - 0.5);
+                                    setZoom(newZoom);
+                                    zoomShared.value = newZoom;
+                                }} style={styles.zoomButton}>
+                                    <Text style={[styles.zoomText, { fontSize: 24, marginTop: -2 }]}>-</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
 
                     <View style={[
                         styles.controls,
@@ -687,8 +1084,9 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                         !isLandscape && { paddingBottom: Math.max(40, insets.bottom + 10) },
                         isLandscape && { paddingRight: Math.max(20, insets.right + 10) }
                     ]}>
-                        <View style={styles.infoRow}>
-                            {retakeTarget && (
+                        <View style={[styles.infoRow, isLandscape && styles.infoRowLandscape]}>
+                            {/* Portrait only - landscape version is in camera overlay */}
+                            {!isLandscape && retakeTarget && (
                                 <TouchableOpacity
                                     style={styles.retakeLabel}
                                     onPress={() => setRetakeTarget(null)}
@@ -699,7 +1097,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 </TouchableOpacity>
                             )}
 
-                            {!isRoot && (
+                            {!isLandscape && !isRoot && (
                                 <TouchableOpacity
                                     style={styles.filenameIndicator}
                                     onPress={retakeTarget ? undefined : openIndexEditor}
@@ -716,59 +1114,9 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                             )}
                         </View>
 
-                        <View style={[styles.modeToggleContainer, isLandscape && styles.modeToggleContainerLandscape]}>
-                            <View style={[
-                                styles.modeIndicator,
-                                mode === 'video' && styles.modeIndicatorVideo,
-                                isLandscape && styles.modeIndicatorLandscape,
-                                isLandscape && mode === 'video' && styles.modeIndicatorVideoLandscape
-                            ]} />
-                            <TouchableOpacity
-                                onPress={() => setMode('photo')}
-                                style={[styles.modeToggleButton, isLandscape && styles.modeToggleButtonLandscape]}
-                            >
-                                <Text style={[styles.modeToggleText, mode === 'photo' && styles.activeModeToggleText]}>PHOTO</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => setMode('video')}
-                                style={[styles.modeToggleButton, isLandscape && styles.modeToggleButtonLandscape]}
-                            >
-                                <Text style={[styles.modeToggleText, mode === 'video' && styles.activeModeToggleText]}>VIDEO</Text>
-                            </TouchableOpacity>
-                        </View>
+                        {!isLandscape && renderPortraitCenterStack()}
 
-                        {isRecording && (
-                            <View style={styles.recordingTimerContainer}>
-                                <View style={styles.recordingTimerDot} />
-                                <Text style={styles.recordingTimerText}>{formatDuration(recordingDuration)}</Text>
-                            </View>
-                        )}
-
-                        <View style={styles.actionRow}>
-                            <View style={styles.leftActionContainer}>
-                                <TouchableOpacity
-                                    style={styles.thumbnailButton}
-                                    onPress={() => setShowGallery(true)}
-                                >
-                                    {lastPhoto ? (
-                                        <Image source={{ uri: `file://${lastPhoto}` }} style={styles.thumbnailImage} />
-                                    ) : (
-                                        <View style={styles.thumbnailPlaceholder} />
-                                    )}
-                                </TouchableOpacity>
-                            </View>
-
-                            <TouchableOpacity
-                                style={[styles.captureButton, mode === 'video' && styles.videoButton]}
-                                onPress={mode === 'photo' ? takePhoto : toggleRecording}
-                            >
-                                {isRecording && <View style={styles.recordingIndicator} />}
-                            </TouchableOpacity>
-
-                            <View style={[styles.rightActionContainer, !isLandscape && styles.rightActionContainerPortrait]}>
-                                {!isLandscape && renderSettingsGrid()}
-                            </View>
-                        </View>
+                        {isLandscape ? renderLandscapeControls() : renderPortraitControls()}
                     </View>
                 </View>
             )}
@@ -998,6 +1346,23 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#000',
     },
+    cameraContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+    },
+    cameraWrapper: {
+        width: '100%',
+        overflow: 'hidden',
+    },
+    camera: {
+        width: '100%',
+        height: '100%',
+    },
     header: {
         position: 'absolute',
         top: 0,
@@ -1124,11 +1489,38 @@ const styles = StyleSheet.create({
         marginBottom: 15,
         width: '100%',
     },
+    infoRowLandscape: {
+        display: 'none',  // Hidden in landscape - shown in camera overlay instead
+    },
+    cameraInfoOverlayRight: {
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        alignItems: 'flex-end',
+        zIndex: 20,
+    },
+    cameraInfoOverlayLeft: {
+        position: 'absolute',
+        top: 10,
+        left: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 20,
+        gap: 8,
+    },
+    cameraInfoOverlayBottomLeft: {
+        position: 'absolute',
+        bottom: 10,
+        left: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 20,
+    },
     filenameIndicator: {
         backgroundColor: 'rgba(0,0,0,0.6)',
         paddingHorizontal: 15,
-        paddingVertical: 4,
-        borderRadius: 15,
+        paddingVertical: 8,
+        borderRadius: 20,
     },
     filenameIndicatorText: {
         color: '#FFD700',
@@ -1163,7 +1555,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 100,
         marginBottom: 0,
-        marginRight: 20,
+        marginRight: 0,
     },
     modeIndicator: {
         position: 'absolute',
@@ -1208,12 +1600,48 @@ const styles = StyleSheet.create({
         color: '#FFD700',
         opacity: 1,
     },
+    topControlBar: {
+        position: 'absolute',
+        top: 0,
+        height: 50,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        zIndex: 20,
+    },
+    topControlBarLandscape: {
+        height: 'auto',
+        // top/left/right overridden in component
+        flexDirection: 'column',
+        gap: 15,
+    },
+    miniIconButton: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        borderRadius: 20,
+        marginLeft: 10,
+    },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         width: '100%',
         height: 100,
+    },
+    actionRowLandscape: {
+        flexDirection: 'column',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 0,
+        gap: 40,
+    },
+    landscapeGridItem: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     leftActionContainer: {
         position: 'absolute',
@@ -1352,7 +1780,7 @@ const styles = StyleSheet.create({
         left: 'auto',
         width: 150,
         height: '100%',
-        justifyContent: 'center',
+        justifyContent: 'space-between',
         paddingBottom: 0,
         paddingRight: 20,
     },
@@ -1400,6 +1828,38 @@ const styles = StyleSheet.create({
         right: 170,
         flexDirection: 'column-reverse',
         transform: [{ translateY: -50 }],
+    },
+    landscapeSecondaryContainer: {
+        position: 'absolute',
+        right: 170,
+        top: '50%',
+        transform: [{ translateY: -50 }],
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 20,
+        zIndex: 10,
+    },
+    zoomVerticalStack: {
+        flexDirection: 'column',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        alignItems: 'center',
+        paddingVertical: 10,
+        width: 60,
+    },
+    portraitCenterStack: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 20,
+        gap: 15,
+        width: '100%',
+    },
+    zoomControlsPortrait: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        paddingHorizontal: 10,
     },
     zoomButton: {
         width: 40,

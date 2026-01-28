@@ -10,15 +10,17 @@ import {
     Dimensions,
     Alert,
     SafeAreaView,
+    useWindowDimensions,
 } from 'react-native';
 import Video from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { listPhotos, deleteFile, parseFilename } from '../utils/StorageUtils';
 import type { ReadDirItem } from 'react-native-fs';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
-const COLUMN_COUNT = 3;
-const ITEM_SIZE = width / COLUMN_COUNT;
+const COLUMN_COUNT_PORTRAIT = 3;
+const COLUMN_COUNT_LANDSCAPE = 6;
 
 interface Props {
     folderPath: string;
@@ -26,7 +28,83 @@ interface Props {
     onRetake: (target: { sequence?: number; subSequence?: number; textLabel?: string }) => void;
 }
 
+const ZoomableImage = ({ uri }: { uri: string }) => {
+    const scale = useSharedValue(1);
+    const savedScale = useSharedValue(1);
+    const translateX = useSharedValue(0);
+    const savedTranslateX = useSharedValue(0);
+    const translateY = useSharedValue(0);
+    const savedTranslateY = useSharedValue(0);
+
+    const pinch = Gesture.Pinch()
+        .onUpdate((e) => {
+            scale.value = savedScale.value * e.scale;
+        })
+        .onEnd(() => {
+            if (scale.value < 1) {
+                scale.value = withTiming(1);
+                translateX.value = withTiming(0);
+                translateY.value = withTiming(0);
+            }
+            savedScale.value = scale.value;
+        });
+
+    const pan = Gesture.Pan()
+        .averageTouches(true)
+        .onUpdate((e) => {
+            if (scale.value > 1) {
+                translateX.value = savedTranslateX.value + e.translationX;
+                translateY.value = savedTranslateY.value + e.translationY;
+            }
+        })
+        .onEnd(() => {
+            savedTranslateX.value = translateX.value;
+            savedTranslateY.value = translateY.value;
+        });
+
+    const doubleTap = Gesture.Tap()
+        .numberOfTaps(2)
+        .onEnd(() => {
+            if (scale.value > 1.5) {
+                scale.value = withTiming(1);
+                translateX.value = withTiming(0);
+                translateY.value = withTiming(0);
+                savedScale.value = 1;
+                savedTranslateX.value = 0;
+                savedTranslateY.value = 0;
+            } else {
+                scale.value = withTiming(2);
+                savedScale.value = 2;
+            }
+        });
+
+    const composed = Gesture.Simultaneous(pinch, pan);
+    const gesture = Gesture.Race(doubleTap, composed);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: translateX.value },
+            { translateY: translateY.value },
+            { scale: scale.value }
+        ]
+    }));
+
+    return (
+        <GestureDetector gesture={gesture}>
+            <Animated.Image
+                source={{ uri }}
+                style={[styles.fullImage, animatedStyle]}
+                resizeMode="contain"
+            />
+        </GestureDetector>
+    );
+};
+
 const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
+    const numColumns = isLandscape ? COLUMN_COUNT_LANDSCAPE : COLUMN_COUNT_PORTRAIT;
+    const itemSize = width / numColumns;
     const insets = useSafeAreaInsets();
     const [photos, setPhotos] = useState<ReadDirItem[]>([]);
     const [selectedPhoto, setSelectedPhoto] = useState<ReadDirItem | null>(null);
@@ -145,6 +223,7 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
         <TouchableOpacity
             style={[
                 styles.itemContainer,
+                { width: itemSize, height: itemSize },
                 selectionMode && selectedItems.has(item.path) && styles.selectedItemContainer
             ]}
             onPress={() => handlePress(item)}
@@ -217,7 +296,8 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                 data={photos}
                 renderItem={renderItem}
                 keyExtractor={(item) => item.path}
-                numColumns={COLUMN_COUNT}
+                numColumns={numColumns}
+                key={numColumns} // Force re-render when column count changes
                 contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(20, insets.bottom) }]}
             />
 
@@ -233,57 +313,55 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                 animationType="fade"
                 onRequestClose={() => setSelectedPhoto(null)}
             >
-                <View style={styles.viewerContainer}>
-                    <View style={[styles.viewerHeader, { paddingTop: Math.max(10, insets.top) }]}>
-                        <TouchableOpacity
-                            onPress={() => setSelectedPhoto(null)}
-                            style={styles.viewerButton}
-                        >
-                            <Text style={styles.viewerButtonText}>Close</Text>
-                        </TouchableOpacity>
+                <GestureHandlerRootView style={{ flex: 1 }}>
+                    <View style={styles.viewerContainer}>
+                        <View style={[styles.viewerHeader, { paddingTop: Math.max(10, insets.top) }]}>
+                            <TouchableOpacity
+                                onPress={() => setSelectedPhoto(null)}
+                                style={styles.viewerButton}
+                            >
+                                <Text style={styles.viewerButtonText}>Close</Text>
+                            </TouchableOpacity>
 
-                        <View style={styles.viewerTitleContainer}>
-                            <Text style={styles.viewerTitle} numberOfLines={1}>
-                                {selectedPhoto?.name}
-                            </Text>
+                            <View style={styles.viewerTitleContainer}>
+                                <Text style={styles.viewerTitle} numberOfLines={1}>
+                                    {selectedPhoto?.name}
+                                </Text>
+                            </View>
+
+                            {!isVideo(selectedPhoto) && (
+                                <TouchableOpacity
+                                    onPress={handleRetake}
+                                    style={[styles.viewerButton, styles.retakeButton]}
+                                >
+                                    <Text style={styles.viewerButtonText}>Retake</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            <TouchableOpacity
+                                onPress={() => selectedPhoto && handleDelete(selectedPhoto)}
+                                style={[styles.viewerButton, styles.deleteButton]}
+                            >
+                                <Text style={styles.viewerButtonText}>Delete</Text>
+                            </TouchableOpacity>
                         </View>
 
-                        {!isVideo(selectedPhoto) && (
-                            <TouchableOpacity
-                                onPress={handleRetake}
-                                style={[styles.viewerButton, styles.retakeButton]}
-                            >
-                                <Text style={styles.viewerButtonText}>Retake</Text>
-                            </TouchableOpacity>
+                        {selectedPhoto && (
+                            isVideo(selectedPhoto) ? (
+                                <Video
+                                    ref={videoRef}
+                                    source={{ uri: `file://${selectedPhoto.path}` }}
+                                    style={styles.fullVideo}
+                                    controls={true}
+                                    resizeMode="contain"
+                                    repeat={false}
+                                />
+                            ) : (
+                                <ZoomableImage uri={`file://${selectedPhoto.path}`} />
+                            )
                         )}
-
-                        <TouchableOpacity
-                            onPress={() => selectedPhoto && handleDelete(selectedPhoto)}
-                            style={[styles.viewerButton, styles.deleteButton]}
-                        >
-                            <Text style={styles.viewerButtonText}>Delete</Text>
-                        </TouchableOpacity>
                     </View>
-
-                    {selectedPhoto && (
-                        isVideo(selectedPhoto) ? (
-                            <Video
-                                ref={videoRef}
-                                source={{ uri: `file://${selectedPhoto.path}` }}
-                                style={styles.fullVideo}
-                                controls={true}
-                                resizeMode="contain"
-                                repeat={false}
-                            />
-                        ) : (
-                            <Image
-                                source={{ uri: `file://${selectedPhoto.path}` }}
-                                style={styles.fullImage}
-                                resizeMode="contain"
-                            />
-                        )
-                    )}
-                </View>
+                </GestureHandlerRootView>
             </Modal>
         </View>
     );
@@ -336,8 +414,6 @@ const styles = StyleSheet.create({
         paddingBottom: 20,
     },
     itemContainer: {
-        width: ITEM_SIZE,
-        height: ITEM_SIZE,
         padding: 1,
     },
     thumbnail: {

@@ -14,6 +14,7 @@ import { listFolders, renameFolder, deleteFolder, createNewSessionFolder, BASE_D
 interface Folder {
     name: string;
     path: string;
+    isEmpty?: boolean;
 }
 
 interface Props {
@@ -34,11 +35,11 @@ const FolderSelector: React.FC<Props> = ({ onSelect, onBack, currentFolderName }
 
     const loadFolders = async () => {
         const list = await listFolders();
-        const folderList = list.map(f => ({ name: f.name, path: f.path }));
+        const folderList = list.map(f => ({ name: f.name, path: f.path, isEmpty: f.isEmpty }));
 
         // Add root folder at the top
         setFolders([
-            { name: 'WorkPhotos (Root)', path: BASE_DIR },
+            { name: 'WorkPhotos (Root)', path: BASE_DIR, isEmpty: false }, // Assume root is never "empty" in the sense of unused
             ...folderList
         ]);
     };
@@ -200,8 +201,12 @@ const FolderSelector: React.FC<Props> = ({ onSelect, onBack, currentFolderName }
                                     )}
                                 </View>
                             )}
-                            <Text style={[styles.itemName, selectionMode && styles.itemNameWithCheckbox]}>
-                                {item.name}
+                            <Text style={[
+                                styles.itemName,
+                                selectionMode && styles.itemNameWithCheckbox,
+                                item.isEmpty && styles.emptyItemText
+                            ]}>
+                                {item.name} {item.isEmpty ? '(Empty)' : ''}
                             </Text>
                             {!selectionMode && item.path !== BASE_DIR && (
                                 <TouchableOpacity onPress={() => handleDelete(item)}>
@@ -295,6 +300,10 @@ const styles = StyleSheet.create({
     deleteText: {
         color: '#FF3B30',
         fontSize: 14,
+    },
+    emptyItemText: {
+        color: '#FF9500', // Orange for empty folders
+        fontStyle: 'italic',
     },
 });
 
