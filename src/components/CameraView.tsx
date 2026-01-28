@@ -450,14 +450,14 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
             isLandscape && styles.topControlBarLandscape,
             isLandscape ? {
                 // Landscape: Place in Left Pillarbox
-                left: Math.max(insets.left, 10), // slight offset from edge
+                left: 0, // slight offset from edge
                 right: undefined, // Clear right
                 top: 20,
                 width: 50, // Fixed width for column
                 alignItems: 'center',
             } : {
                 // Portrait: Place in Top Letterbox
-                top: Platform.OS === 'android' ? 10 : insets.top,
+                top: 0,
                 right: 15,
                 height: 50, // Fit within the top padding
                 alignItems: 'center',
@@ -688,27 +688,23 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
 
     const containerStyle = useMemo(() => {
         if (isLandscape) {
-            // Landscape: Add left padding (pillarbox) = Safe Area + Control Space
-            const leftPadding = insets.left + 50; // 50px for controls
             return [
                 styles.cameraContainer,
                 {
-                    paddingLeft: leftPadding,
+                    paddingLeft: 50, // Flush with controls (width 50)
                     justifyContent: 'center' as const,
                     alignItems: 'flex-start' as const,
                 }
             ];
         }
-        // Portrait: Add top padding (letterbox) = Safe Area + Control Space
-        const topPadding = insets.top + 50; // 50px for controls
         return [
             styles.cameraContainer,
             {
-                paddingTop: topPadding,
+                paddingTop: 50, // Flush with controls (height 50)
                 justifyContent: 'flex-start' as const,
             }
         ];
-    }, [isLandscape, insets.top, insets.left]);
+    }, [isLandscape]);
 
     const wrapperStyle = useMemo<StyleProp<ViewStyle>>(() => {
         if (isLandscape) {
@@ -947,8 +943,9 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                     <SafeAreaView style={[
                         styles.header,
                         {
-                            top: isLandscape ? 0 : (insets.top + 50), // Align with camera start
-                            left: isLandscape ? (insets.left + 50) : 0, // Align with camera start
+                            // Header aligns with camera view start
+                            top: isLandscape ? 0 : 50,
+                            left: isLandscape ? 50 : 0,
                             paddingTop: 10
                         }
                     ]}>
