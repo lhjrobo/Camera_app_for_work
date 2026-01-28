@@ -402,50 +402,63 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         }
     };
 
-    const renderSettingsGrid = () => (
-        <View style={[styles.settingsGrid, !isLandscape && styles.settingsGridVertical]}>
-            {!isRoot && lastPhoto && !retakeTarget && (
-                <TouchableOpacity
-                    onPress={retakeLast}
-                    style={[styles.glassButton, styles.gridButton, styles.retakeGridButton, !isLandscape && styles.gridButtonVertical]}
-                >
-                    <Text style={styles.retakeGridIcon}>↺</Text>
-                    <Text style={styles.retakeGridText}>再撮影</Text>
-                </TouchableOpacity>
-            )}
-            {labelingMode !== 'single' && (
-                <TouchableOpacity
-                    onPress={nextSequence}
-                    style={[styles.glassButton, styles.gridButton, styles.nextGroupButton, !isLandscape && styles.gridButtonVertical]}
-                >
-                    <Text style={styles.nextGroupIcon}>→</Text>
-                    <Text style={styles.nextGroupText}>
-                        {labelingMode === 'text-group' ? '次ラベル' : sequence + 1}
-                    </Text>
-                </TouchableOpacity>
-            )}
+    const renderSettingsGrid = () => {
+        // Retake button component
+        const retakeButton = !isRoot && lastPhoto && !retakeTarget && (
+            <TouchableOpacity
+                key="retake"
+                onPress={retakeLast}
+                style={[styles.glassButton, styles.gridButton, styles.retakeGridButton, !isLandscape && styles.gridButtonVertical]}
+            >
+                <Text style={styles.retakeGridIcon}>↺</Text>
+                <Text style={styles.retakeGridText}>再撮影</Text>
+            </TouchableOpacity>
+        );
 
-            {!isRoot && (
-                <TouchableOpacity
-                    onPress={() => {
-                        if (labelingMode === 'single') setLabelingMode('numbered-group');
-                        else if (labelingMode === 'numbered-group') {
-                            setLabelingMode('text-group');
-                            setIsEnteringLabel(true); // Prompt immediately when switching to text group
-                        }
-                        else setLabelingMode('single');
-                    }}
-                    style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
-                >
-                    {renderIcon('grouped', labelingMode !== 'single')}
-                </TouchableOpacity>
-            )}
+        // Next group button component
+        const nextGroupButton = labelingMode !== 'single' && (
+            <TouchableOpacity
+                key="nextGroup"
+                onPress={nextSequence}
+                style={[styles.glassButton, styles.gridButton, styles.nextGroupButton, !isLandscape && styles.gridButtonVertical]}
+            >
+                <Text style={styles.nextGroupIcon}>→</Text>
+                <Text style={styles.nextGroupText}>
+                    {labelingMode === 'text-group' ? '次ラベル' : sequence + 1}
+                </Text>
+            </TouchableOpacity>
+        );
 
+        // Label select button component
+        const labelSelectButton = !isRoot && (
+            <TouchableOpacity
+                key="labelSelect"
+                onPress={() => {
+                    if (labelingMode === 'single') setLabelingMode('numbered-group');
+                    else if (labelingMode === 'numbered-group') {
+                        setLabelingMode('text-group');
+                        setIsEnteringLabel(true);
+                    }
+                    else setLabelingMode('single');
+                }}
+                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
+            >
+                {renderIcon('grouped', labelingMode !== 'single')}
+            </TouchableOpacity>
+        );
 
-
-
-        </View >
-    );
+        return (
+            <View style={[styles.settingsGrid, !isLandscape && styles.settingsGridVertical]}>
+                {isLandscape ? (
+                    // Landscape: label select, next group, retake
+                    <>{labelSelectButton}{nextGroupButton}{retakeButton}</>
+                ) : (
+                    // Portrait: retake, next group, label select (original order)
+                    <>{retakeButton}{nextGroupButton}{labelSelectButton}</>
+                )}
+            </View>
+        );
+    };
 
     const renderTopControls = () => (
         <View style={[
@@ -921,6 +934,62 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 resizeMode="cover"
                             />
 
+                            {/* Next label overlay inside camera - landscape only */}
+                            {isLandscape && !isRoot && (
+                                <View style={styles.cameraInfoOverlayRight} pointerEvents="box-none">
+                                    {retakeTarget && (
+                                        <TouchableOpacity
+                                            style={styles.retakeLabel}
+                                            onPress={() => setRetakeTarget(null)}
+                                        >
+                                            <Text style={styles.retakeLabelText}>
+                                                Retaking {formatFilename(retakeTarget.sequence ?? 0, retakeTarget.subSequence, retakeTarget.textLabel).replace('.jpg', '')} ✕
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                    <TouchableOpacity
+                                        style={styles.filenameIndicator}
+                                        onPress={retakeTarget ? undefined : openIndexEditor}
+                                        disabled={!!retakeTarget}
+                                    >
+                                        <Text style={styles.filenameIndicatorText}>
+                                            Next: {formatFilename(
+                                                retakeTarget?.sequence ?? sequence,
+                                                retakeTarget ? retakeTarget.subSequence : (labelingMode !== 'single' ? subSequence : undefined),
+                                                retakeTarget ? retakeTarget.textLabel : (labelingMode === 'text-group' ? textLabel : undefined)
+                                            ).replace('.jpg', '')} ✎
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* Folder select overlay inside camera - landscape only */}
+                            {isLandscape && (
+                                <View style={styles.cameraInfoOverlayLeft} pointerEvents="box-none">
+                                    <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
+                                        <Text style={styles.folderText}>📁 {isRoot ? 'WorkPhotos' : currentFolder.name}</Text>
+                                    </TouchableOpacity>
+                                    {!isRoot && (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setNewFolderName(getFolderBaseName(currentFolder.name));
+                                                setIsRenaming(true);
+                                            }}
+                                            style={styles.editFolderButton}
+                                        >
+                                            <Text style={styles.editFolderIcon}>✎</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            )}
+
+                            {/* Label select & retake overlay inside camera - landscape only - bottom left */}
+                            {isLandscape && (
+                                <View style={styles.cameraInfoOverlayBottomLeft} pointerEvents="box-none">
+                                    {renderSettingsGrid()}
+                                </View>
+                            )}
+
                         </View>
                     </TouchableWithoutFeedback>
                 </Reanimated.View>
@@ -948,29 +1017,33 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                         {
                             // Header aligns with camera view start
                             top: isLandscape ? 0 : 50,
-                            left: isLandscape ? 50 : 0,
-                            paddingTop: 10
+                            left: isLandscape ? 60 : 0,  // 50 (camera padding) + 10 (to match Next UI margin)
+                            paddingTop: 10,
+                            paddingHorizontal: isLandscape ? 0 : 20,  // No extra padding in landscape
                         }
                     ]}>
-                        <View style={styles.headerLeft}>
-                            <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
-                                <Text style={styles.folderText}>📁 {isRoot ? 'WorkPhotos' : currentFolder.name}</Text>
-                            </TouchableOpacity>
-                            {!isRoot && (
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setNewFolderName(getFolderBaseName(currentFolder.name));
-                                        setIsRenaming(true);
-                                    }}
-                                    style={styles.editFolderButton}
-                                >
-                                    <Text style={styles.editFolderIcon}>✎</Text>
+                        {/* Portrait only - landscape version is in camera overlay */}
+                        {!isLandscape && (
+                            <View style={styles.headerLeft}>
+                                <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
+                                    <Text style={styles.folderText}>📁 {isRoot ? 'WorkPhotos' : currentFolder.name}</Text>
                                 </TouchableOpacity>
-                            )}
-                        </View>
+                                {!isRoot && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setNewFolderName(getFolderBaseName(currentFolder.name));
+                                            setIsRenaming(true);
+                                        }}
+                                        style={styles.editFolderButton}
+                                    >
+                                        <Text style={styles.editFolderIcon}>✎</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        )}
 
                         <View style={styles.headerRight}>
-                            {isLandscape && renderSettingsGrid()}
+                            {/* Settings grid moved to camera overlay in landscape */}
                         </View>
                     </SafeAreaView>
 
@@ -1011,8 +1084,9 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                         !isLandscape && { paddingBottom: Math.max(40, insets.bottom + 10) },
                         isLandscape && { paddingRight: Math.max(20, insets.right + 10) }
                     ]}>
-                        <View style={styles.infoRow}>
-                            {retakeTarget && (
+                        <View style={[styles.infoRow, isLandscape && styles.infoRowLandscape]}>
+                            {/* Portrait only - landscape version is in camera overlay */}
+                            {!isLandscape && retakeTarget && (
                                 <TouchableOpacity
                                     style={styles.retakeLabel}
                                     onPress={() => setRetakeTarget(null)}
@@ -1023,7 +1097,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 </TouchableOpacity>
                             )}
 
-                            {!isRoot && (
+                            {!isLandscape && !isRoot && (
                                 <TouchableOpacity
                                     style={styles.filenameIndicator}
                                     onPress={retakeTarget ? undefined : openIndexEditor}
@@ -1415,11 +1489,38 @@ const styles = StyleSheet.create({
         marginBottom: 15,
         width: '100%',
     },
+    infoRowLandscape: {
+        display: 'none',  // Hidden in landscape - shown in camera overlay instead
+    },
+    cameraInfoOverlayRight: {
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        alignItems: 'flex-end',
+        zIndex: 20,
+    },
+    cameraInfoOverlayLeft: {
+        position: 'absolute',
+        top: 10,
+        left: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 20,
+        gap: 8,
+    },
+    cameraInfoOverlayBottomLeft: {
+        position: 'absolute',
+        bottom: 10,
+        left: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 20,
+    },
     filenameIndicator: {
         backgroundColor: 'rgba(0,0,0,0.6)',
         paddingHorizontal: 15,
-        paddingVertical: 4,
-        borderRadius: 15,
+        paddingVertical: 8,
+        borderRadius: 20,
     },
     filenameIndicatorText: {
         color: '#FFD700',
@@ -1535,7 +1636,7 @@ const styles = StyleSheet.create({
         height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        paddingTop: 60,
+        paddingTop: 0,
         gap: 40,
     },
     landscapeGridItem: {
@@ -1679,7 +1780,7 @@ const styles = StyleSheet.create({
         left: 'auto',
         width: 150,
         height: '100%',
-        justifyContent: 'center',
+        justifyContent: 'space-between',
         paddingBottom: 0,
         paddingRight: 20,
     },
