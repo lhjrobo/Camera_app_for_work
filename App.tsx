@@ -10,7 +10,7 @@ import {
   PermissionsAndroid,
   Platform,
 } from 'react-native';
-import { initStorage, createNewSessionFolder, renameFolder, BASE_DIR } from './src/utils/StorageUtils';
+import { initStorage, createNewSessionFolder, renameFolder, BASE_DIR, requestStoragePermission, saveLastFolder, getLastFolder } from './src/utils/StorageUtils';
 import CameraView from './src/components/CameraView';
 import FolderSelector from './src/components/FolderSelector';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -28,37 +28,24 @@ const App = () => {
   });
 
   useEffect(() => {
-    const requestPermissions = async () => {
-      if (Platform.OS === 'android') {
-        try {
-          if (Platform.Version >= 33) {
-            await PermissionsAndroid.requestMultiple([
-              PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
-              PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
-            ]);
-          } else {
-            await PermissionsAndroid.requestMultiple([
-              PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-              PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-            ]);
-          }
-        } catch (err) {
-          console.warn(err);
-        }
-      }
-    };
-
     const setup = async () => {
-      await requestPermissions();
+      await requestStoragePermission();
       await initStorage();
-      // Initially, store directly in WorkPhotos root
-      setCurrentFolder({ name: 'WorkPhotos', path: BASE_DIR });
+
+      const lastFolder = await getLastFolder();
+      if (lastFolder) {
+        setCurrentFolder(lastFolder);
+      } else {
+        // Initially, store directly in WorkPhotos root
+        setCurrentFolder({ name: 'WorkPhotos', path: BASE_DIR });
+      }
     };
     setup();
   }, []);
 
   const handleFolderSelect = (folder: { name: string; path: string }) => {
     setCurrentFolder(folder);
+    saveLastFolder(folder);
     setShowFolderSelector(false);
   };
 
@@ -67,6 +54,7 @@ const App = () => {
     try {
       const updatedFolder = await renameFolder(currentFolder.name, newName);
       setCurrentFolder(updatedFolder);
+      saveLastFolder(updatedFolder);
     } catch (e) {
       console.error('Failed to rename folder:', e);
       Alert.alert('Error', 'Failed to rename folder');

@@ -27,7 +27,7 @@ import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Reanimated, { useSharedValue, useAnimatedProps, runOnJS, withTiming, useAnimatedStyle } from 'react-native-reanimated';
 import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
-import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename } from '../utils/StorageUtils';
+import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename, requestStoragePermission } from '../utils/StorageUtils';
 import MediaGallery from './MediaGallery';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -227,7 +227,8 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         (async () => {
             const cameraPermission = await Camera.requestCameraPermission();
             const microphonePermission = await Camera.requestMicrophonePermission();
-            setHasPermission(cameraPermission === 'granted' && microphonePermission === 'granted');
+            const storagePermission = await requestStoragePermission();
+            setHasPermission(cameraPermission === 'granted' && microphonePermission === 'granted' && storagePermission);
 
             // Load last photo and used labels from current folder
             const photos = await listPhotos(currentFolder.path);

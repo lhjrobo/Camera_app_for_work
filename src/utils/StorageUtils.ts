@@ -1,4 +1,5 @@
 import RNFS from 'react-native-fs';
+import { PermissionsAndroid, Platform, Alert, Linking } from 'react-native';
 
 // On Android, DCIM is usually under ExternalStorageDirectoryPath
 export const BASE_DIR = `${RNFS.ExternalStorageDirectoryPath}/DCIM/WorkPhotos`;
@@ -10,6 +11,105 @@ export const initStorage = async () => {
     const exists = await RNFS.exists(BASE_DIR);
     if (!exists) {
         await RNFS.mkdir(BASE_DIR);
+    }
+};
+
+const STATE_FILE = `${RNFS.DocumentDirectoryPath}/app_state.json`;
+
+export const saveLastFolder = async (folder: { name: string; path: string }) => {
+    try {
+        await RNFS.writeFile(STATE_FILE, JSON.stringify(folder), 'utf8');
+    } catch (e) {
+        console.warn('Failed to save state', e);
+    }
+};
+
+export const getLastFolder = async (): Promise<{ name: string; path: string } | null> => {
+    try {
+        if (await RNFS.exists(STATE_FILE)) {
+            const content = await RNFS.readFile(STATE_FILE, 'utf8');
+            return JSON.parse(content);
+        }
+    } catch (e) {
+        console.warn('Failed to load state', e);
+    }
+    return null;
+};
+
+/**
+ * Requests storage permissions. Handles Android 11+ Manage External Storage logic if possible, 
+ * otherwise requests standard Read/Write permissions.
+ */
+export const requestStoragePermission = async () => {
+    if (Platform.OS !== 'android') return true;
+
+    try {
+        let granted = false;
+
+        if (Platform.Version >= 33) {
+            const result = await PermissionsAndroid.requestMultiple([
+                PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+                PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+            ]);
+            granted =
+                result['android.permission.READ_MEDIA_IMAGES'] === PermissionsAndroid.RESULTS.GRANTED &&
+                result['android.permission.READ_MEDIA_VIDEO'] === PermissionsAndroid.RESULTS.GRANTED;
+        } else {
+            const result = await PermissionsAndroid.requestMultiple([
+                PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+                PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+            ]);
+            granted =
+                result['android.permission.READ_EXTERNAL_STORAGE'] === PermissionsAndroid.RESULTS.GRANTED &&
+                result['android.permission.WRITE_EXTERNAL_STORAGE'] === PermissionsAndroid.RESULTS.GRANTED;
+        }
+
+        // Even if standard/media permissions are granted, we require full file access (Manage External Storage)
+        // for features like deleting/renaming any file in the shared folder.
+        // We test this by attempting to write and delete a test file.
+        const hasFullAccess = await verifyFullAccess();
+
+        if (granted && hasFullAccess) {
+            return true;
+        }
+
+        // If we don't have full access, prompt user
+        if (!hasFullAccess) {
+            Alert.alert(
+                "Full Access Required",
+                "To manage photos and folders effectively, this app requires 'All Files Access'.\n\nTap 'Go to Settings', find 'WorkCameraApp_v2', and toggle 'Allow access to manage all files' ON.",
+                [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                        text: "Go to Settings",
+                        onPress: () => {
+                            // Direct intent to "All Files Access" list
+                            Linking.sendIntent("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION")
+                                .catch(() => Linking.openSettings());
+                        }
+                    }
+                ]
+            );
+            return false;
+        }
+
+        return true;
+    } catch (err) {
+        console.warn(err);
+        return false;
+    }
+};
+
+const verifyFullAccess = async () => {
+    try {
+        await initStorage();
+        const testFile = `${BASE_DIR}/.perm_test`;
+        await RNFS.writeFile(testFile, 'test', 'utf8');
+        await RNFS.unlink(testFile);
+        return true;
+    } catch (e) {
+        // console.log('Full access check failed:', e);
+        return false;
     }
 };
 
@@ -106,17 +206,31 @@ export const saveFile = async (tempPath: string, folderPath: string, filename: s
  */
 export const listPhotos = async (folderPath: string) => {
     try {
+        console.log(`[StorageUtils] Listing photos in: ${folderPath}`);
         const files = await RNFS.readDir(folderPath);
-        return files
+        console.log(`[StorageUtils] Found ${files.length} items in readDir.`);
+
+        const filtered = files
             .filter(f => {
-                if (!f.isFile()) return false;
+                if (!f.isFile()) {
+                    // console.log(`[StorageUtils] Ignoring directory: ${f.name}`);
+                    return false;
+                }
                 const name = f.name.toLowerCase();
-                return name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') ||
+                const isMedia = name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') ||
                     name.endsWith('.mp4') || name.endsWith('.mov');
+
+                if (!isMedia) {
+                    console.log(`[StorageUtils] Ignoring non-media file: ${f.name}`);
+                }
+                return isMedia;
             })
             .sort((a, b) => (b.mtime?.getTime() || 0) - (a.mtime?.getTime() || 0));
+
+        console.log(`[StorageUtils] Returning ${filtered.length} media files.`);
+        return filtered;
     } catch (e) {
-        console.error('Error listing media:', e);
+        console.error('[StorageUtils] Error listing media:', e);
         return [];
     }
 };
