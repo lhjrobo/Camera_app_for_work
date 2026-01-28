@@ -404,7 +404,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
 
     const renderSettingsGrid = () => (
         <View style={[styles.settingsGrid, !isLandscape && styles.settingsGridVertical]}>
-            {lastPhoto && !retakeTarget && (
+            {!isRoot && lastPhoto && !retakeTarget && (
                 <TouchableOpacity
                     onPress={retakeLast}
                     style={[styles.glassButton, styles.gridButton, styles.retakeGridButton, !isLandscape && styles.gridButtonVertical]}
@@ -425,19 +425,21 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 </TouchableOpacity>
             )}
 
-            <TouchableOpacity
-                onPress={() => {
-                    if (labelingMode === 'single') setLabelingMode('numbered-group');
-                    else if (labelingMode === 'numbered-group') {
-                        setLabelingMode('text-group');
-                        setIsEnteringLabel(true); // Prompt immediately when switching to text group
-                    }
-                    else setLabelingMode('single');
-                }}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
-            >
-                {renderIcon('grouped', labelingMode !== 'single')}
-            </TouchableOpacity>
+            {!isRoot && (
+                <TouchableOpacity
+                    onPress={() => {
+                        if (labelingMode === 'single') setLabelingMode('numbered-group');
+                        else if (labelingMode === 'numbered-group') {
+                            setLabelingMode('text-group');
+                            setIsEnteringLabel(true); // Prompt immediately when switching to text group
+                        }
+                        else setLabelingMode('single');
+                    }}
+                    style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
+                >
+                    {renderIcon('grouped', labelingMode !== 'single')}
+                </TouchableOpacity>
+            )}
 
 
 

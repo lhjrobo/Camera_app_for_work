@@ -153,9 +153,43 @@ export const createNewSessionFolder = async (prefix: string = 'Session') => {
 /**
  * Lists all folders in the base directory.
  */
+/**
+ * Lists all folders in the base directory with empty status.
+ */
 export const listFolders = async () => {
-    const files = await RNFS.readDir(BASE_DIR);
-    return files.filter(f => f.isDirectory()).sort((a, b) => b.mtime!.getTime() - a.mtime!.getTime());
+    try {
+        const items = await RNFS.readDir(BASE_DIR);
+        const folders = items.filter(f => f.isDirectory()).sort((a, b) => b.mtime!.getTime() - a.mtime!.getTime());
+
+        // Enrich with empty status
+        const enriched = await Promise.all(folders.map(async (f) => {
+            let isEmpty = true;
+            try {
+                const contents = await RNFS.readDir(f.path);
+                // Check for at least one media file
+                const hasMedia = contents.some(c => {
+                    if (!c.isFile()) return false;
+                    const name = c.name.toLowerCase();
+                    return name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') ||
+                        name.endsWith('.mp4') || name.endsWith('.mov');
+                });
+                isEmpty = !hasMedia;
+            } catch (e) {
+                // If we can't read it, assume empty or error
+                console.warn(`Failed to check folder ${f.name}`, e);
+            }
+            return {
+                name: f.name,
+                path: f.path,
+                isEmpty
+            };
+        }));
+
+        return enriched;
+    } catch (e) {
+        console.warn('Failed to list folders', e);
+        return [];
+    }
 };
 
 /**

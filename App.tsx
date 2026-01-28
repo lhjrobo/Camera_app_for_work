@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { initStorage, createNewSessionFolder, renameFolder, BASE_DIR, requestStoragePermission, saveLastFolder, getLastFolder } from './src/utils/StorageUtils';
+import RNFS from 'react-native-fs';
 import CameraView from './src/components/CameraView';
 import FolderSelector from './src/components/FolderSelector';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -61,6 +62,19 @@ const App = () => {
     }
   };
 
+  const handleBack = async () => {
+    if (currentFolder) {
+      const exists = await RNFS.exists(currentFolder.path);
+      if (!exists) {
+        // Folder was deleted, reset to root
+        const rootFolder = { name: 'WorkPhotos', path: BASE_DIR };
+        setCurrentFolder(rootFolder);
+        saveLastFolder(rootFolder);
+      }
+    }
+    setShowFolderSelector(false);
+  };
+
   if (!currentFolder) {
     return (
       <View style={styles.loading}>
@@ -77,7 +91,7 @@ const App = () => {
           {showFolderSelector ? (
             <FolderSelector
               onSelect={handleFolderSelect}
-              onBack={() => setShowFolderSelector(false)}
+              onBack={handleBack}
               currentFolderName={currentFolder.name}
             />
           ) : (
