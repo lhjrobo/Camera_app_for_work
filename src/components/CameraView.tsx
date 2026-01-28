@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     StyleSheet,
@@ -15,6 +15,12 @@ import {
     TextInput,
     Alert,
     NativeModules,
+    StyleProp,
+    ViewStyle,
+    DimensionValue,
+    Platform,
+    AppState,
+    AppStateStatus,
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCodeScanner } from 'react-native-vision-camera';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -23,7 +29,7 @@ import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
 import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename } from '../utils/StorageUtils';
 import MediaGallery from './MediaGallery';
-import { AppState, AppStateStatus } from 'react-native';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ReanimatedCamera = Reanimated.createAnimatedComponent(Camera);
@@ -148,6 +154,14 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     const [labelingMode, setLabelingMode] = useState<'single' | 'numbered-group' | 'text-group'>('single');
     const [textLabel, setTextLabel] = useState('');
     const [isEnteringLabel, setIsEnteringLabel] = useState(false);
+
+    const cameraAspectRatio = useMemo(() => {
+        if (isLandscape) {
+            return mode === 'photo' ? 4 / 3 : 16 / 9;
+        } else {
+            return mode === 'photo' ? 3 / 4 : 9 / 16;
+        }
+    }, [isLandscape, mode]);
     const [sequence, setSequence] = useState(1);
     const [subSequence, setSubSequence] = useState(1);
     const [hasPermission, setHasPermission] = useState(false);
@@ -424,25 +438,45 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 {renderIcon('grouped', labelingMode !== 'single')}
             </TouchableOpacity>
 
+
+
+
+        </View >
+    );
+
+    const renderTopControls = () => (
+        <View style={[
+            styles.topControlBar,
+            isLandscape && styles.topControlBarLandscape,
+            isLandscape ? {
+                // Landscape: Place in Left Pillarbox
+                left: Math.max(insets.left, 10), // slight offset from edge
+                right: undefined, // Clear right
+                top: 20,
+                width: 50, // Fixed width for column
+                alignItems: 'center',
+            } : {
+                // Portrait: Place in Top Letterbox
+                top: Platform.OS === 'android' ? 10 : insets.top,
+                right: 15,
+                height: 50, // Fit within the top padding
+                alignItems: 'center',
+            }
+        ]}>
             <TouchableOpacity
                 onPress={() => setFlash(f => (f === 'off' ? 'on' : f === 'on' ? 'auto' : f === 'auto' ? 'always' : 'off'))}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
+                style={styles.miniIconButton}
             >
                 {renderIcon('flash', flash !== 'off')}
             </TouchableOpacity>
 
             <TouchableOpacity
                 onPress={() => setCameraPosition(p => p === 'back' ? 'front' : 'back')}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
+                onLongPress={() => setShowDeviceList(true)}
+                delayLongPress={500}
+                style={styles.miniIconButton}
             >
                 {renderIcon('switch')}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                onPress={() => setShowDeviceList(true)}
-                style={[styles.glassButton, styles.gridButton, !isLandscape && styles.gridButtonVertical]}
-            >
-                {renderIcon('lenses')}
             </TouchableOpacity>
         </View>
     );
@@ -652,6 +686,47 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         setIndexWarning(null);
     };
 
+    const containerStyle = useMemo(() => {
+        if (isLandscape) {
+            // Landscape: Add left padding (pillarbox) = Safe Area + Control Space
+            const leftPadding = insets.left + 50; // 50px for controls
+            return [
+                styles.cameraContainer,
+                {
+                    paddingLeft: leftPadding,
+                    justifyContent: 'center' as const,
+                    alignItems: 'flex-start' as const,
+                }
+            ];
+        }
+        // Portrait: Add top padding (letterbox) = Safe Area + Control Space
+        const topPadding = insets.top + 50; // 50px for controls
+        return [
+            styles.cameraContainer,
+            {
+                paddingTop: topPadding,
+                justifyContent: 'flex-start' as const,
+            }
+        ];
+    }, [isLandscape, insets.top, insets.left]);
+
+    const wrapperStyle = useMemo<StyleProp<ViewStyle>>(() => {
+        if (isLandscape) {
+            return [
+                styles.cameraWrapper,
+                {
+                    width: undefined,
+                    height: '100%' as DimensionValue,
+                    aspectRatio: cameraAspectRatio
+                }
+            ];
+        }
+        return [
+            styles.cameraWrapper,
+            { aspectRatio: cameraAspectRatio }
+        ];
+    }, [isLandscape, cameraAspectRatio]);
+
     const handleFocus = async (event: any) => {
         if (camera.current) {
             const { pageX, pageY } = event.nativeEvent;
@@ -680,6 +755,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     };
 
     if (!device || !hasPermission) {
+
         return (
             <View style={styles.container}>
                 <Text style={styles.text}>No Camera Device or Permission</Text>
@@ -819,16 +895,20 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         </View>
     );
 
+
+
+
+
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#000" hidden={!showGallery} />
             <GestureDetector gesture={pinchGesture}>
-                <Reanimated.View style={StyleSheet.absoluteFill}>
+                <Reanimated.View style={containerStyle}>
                     <TouchableWithoutFeedback onPress={handleFocus}>
-                        <View style={StyleSheet.absoluteFill}>
+                        <View style={wrapperStyle}>
                             <ReanimatedCamera
                                 ref={camera}
-                                style={StyleSheet.absoluteFill}
+                                style={styles.camera}
                                 device={device}
                                 isActive={isForeground && !showGallery}
                                 photo={true}
@@ -839,7 +919,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 animatedProps={animatedProps}
                                 videoStabilizationMode="off"
                                 outputOrientation="device"
-                                resizeMode="contain"
+                                resizeMode="cover"
                             />
 
                         </View>
@@ -866,8 +946,11 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
                     <SafeAreaView style={[
                         styles.header,
-                        isLandscape && styles.headerLandscape,
-                        { paddingTop: Math.max(10, insets.top) }
+                        {
+                            top: isLandscape ? 0 : (insets.top + 50), // Align with camera start
+                            left: isLandscape ? (insets.left + 50) : 0, // Align with camera start
+                            paddingTop: 10
+                        }
                     ]}>
                         <View style={styles.headerLeft}>
                             <TouchableOpacity onPress={onOpenFolders} style={styles.folderButton}>
@@ -891,6 +974,8 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                         </View>
                     </SafeAreaView>
 
+
+                    {renderTopControls()}
 
                     {isLandscape && (
                         <View style={styles.landscapeSecondaryContainer}>
@@ -1187,6 +1272,23 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#000',
     },
+    cameraContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+    },
+    cameraWrapper: {
+        width: '100%',
+        overflow: 'hidden',
+    },
+    camera: {
+        width: '100%',
+        height: '100%',
+    },
     header: {
         position: 'absolute',
         top: 0,
@@ -1396,6 +1498,30 @@ const styles = StyleSheet.create({
     activeModeToggleText: {
         color: '#FFD700',
         opacity: 1,
+    },
+    topControlBar: {
+        position: 'absolute',
+        top: 0,
+        height: 50,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        zIndex: 20,
+    },
+    topControlBarLandscape: {
+        height: 'auto',
+        // top/left/right overridden in component
+        flexDirection: 'column',
+        gap: 15,
+    },
+    miniIconButton: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        borderRadius: 20,
+        marginLeft: 10,
     },
     actionRow: {
         flexDirection: 'row',
