@@ -154,28 +154,14 @@ const CameraView: React.FC<Props> = ({
     const devices = useCameraDevices();
     const defaultDevice = useCameraDevice(cameraPosition);
     const [isForeground, setIsForeground] = useState(true);
-    const savedFlashRef = useRef<'off' | 'on' | 'auto' | 'always' | null>(null);
     const [flash, setFlash] = useState<'off' | 'on' | 'auto' | 'always'>(initialFlashMode);
-
     useEffect(() => {
         const onChange = (state: AppStateStatus) => {
-            const isActive = state === 'active';
-
-            if (!isActive && flash === 'always') {
-                // Going to background with torch on - save state and turn off
-                savedFlashRef.current = flash;
-                setFlash('off');
-            } else if (isActive && savedFlashRef.current) {
-                // Returning to foreground - restore saved flash state
-                setFlash(savedFlashRef.current);
-                savedFlashRef.current = null;
-            }
-
-            setIsForeground(isActive);
+            setIsForeground(state === 'active');
         };
         const listener = AppState.addEventListener('change', onChange);
         return () => listener.remove();
-    }, [flash]);
+    }, []);
 
     const device = selectedDeviceId
         ? devices.find(d => d.id === selectedDeviceId)
