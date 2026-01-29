@@ -29,8 +29,10 @@ import KeyEvent from 'react-native-keyevent';
 import { VolumeManager } from 'react-native-volume-manager';
 import { formatFilename, saveFile, listPhotos, archiveExistingFile, parseFilename, getFolderBaseName, fileExists, BASE_DIR, formatTimestampFilename, scanMediaFile, findHighestSequence, getUniqueFilename, requestStoragePermission } from '../utils/StorageUtils';
 import MediaGallery from './MediaGallery';
-
+import SettingsModal from './SettingsModal';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppSettings, saveLastUsedState } from '../utils/SettingsStorage';
 
 const ReanimatedCamera = Reanimated.createAnimatedComponent(Camera);
 
@@ -43,6 +45,11 @@ interface Props {
         landscape: { x: number; y: number };
     };
     onShutterPositionChange: (pos: { x: number; y: number }, mode: 'portrait' | 'landscape') => void;
+    onSettingsChange?: (settings: AppSettings) => void;
+    initialLabelingMode?: 'single' | 'numbered-group' | 'text-group';
+    initialCaptureMode?: 'photo' | 'video';
+    initialFlashMode?: 'off' | 'on' | 'auto' | 'always';
+    initialCameraPosition?: 'front' | 'back';
 }
 
 const { ShutterModule } = NativeModules;
@@ -118,11 +125,22 @@ const DraggableShutterButton = ({
     );
 };
 
-const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFolder, shutterPositions, onShutterPositionChange }) => {
+const CameraView: React.FC<Props> = ({
+    currentFolder,
+    onOpenFolders,
+    onRenameFolder,
+    shutterPositions,
+    onShutterPositionChange,
+    onSettingsChange,
+    initialLabelingMode = 'single',
+    initialCaptureMode = 'photo',
+    initialFlashMode = 'off',
+    initialCameraPosition = 'back',
+}) => {
     const isRoot = currentFolder.path === BASE_DIR;
     const insets = useSafeAreaInsets();
     const camera = useRef<Camera>(null);
-    const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>('back');
+    const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>(initialCameraPosition);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [showDeviceList, setShowDeviceList] = useState(false);
 
@@ -136,22 +154,36 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     const devices = useCameraDevices();
     const defaultDevice = useCameraDevice(cameraPosition);
     const [isForeground, setIsForeground] = useState(true);
+    const savedFlashRef = useRef<'off' | 'on' | 'auto' | 'always' | null>(null);
+    const [flash, setFlash] = useState<'off' | 'on' | 'auto' | 'always'>(initialFlashMode);
 
     useEffect(() => {
         const onChange = (state: AppStateStatus) => {
-            setIsForeground(state === 'active');
+            const isActive = state === 'active';
+
+            if (!isActive && flash === 'always') {
+                // Going to background with torch on - save state and turn off
+                savedFlashRef.current = flash;
+                setFlash('off');
+            } else if (isActive && savedFlashRef.current) {
+                // Returning to foreground - restore saved flash state
+                setFlash(savedFlashRef.current);
+                savedFlashRef.current = null;
+            }
+
+            setIsForeground(isActive);
         };
         const listener = AppState.addEventListener('change', onChange);
         return () => listener.remove();
-    }, []);
+    }, [flash]);
 
     const device = selectedDeviceId
         ? devices.find(d => d.id === selectedDeviceId)
         : defaultDevice;
 
     const [isRecording, setIsRecording] = useState(false);
-    const [mode, setMode] = useState<'photo' | 'video'>('photo');
-    const [labelingMode, setLabelingMode] = useState<'single' | 'numbered-group' | 'text-group'>('single');
+    const [mode, setMode] = useState<'photo' | 'video'>(initialCaptureMode);
+    const [labelingMode, setLabelingMode] = useState<'single' | 'numbered-group' | 'text-group'>(initialLabelingMode);
     const [textLabel, setTextLabel] = useState('');
     const [isEnteringLabel, setIsEnteringLabel] = useState(false);
 
@@ -166,12 +198,12 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
     const [subSequence, setSubSequence] = useState(1);
     const [hasPermission, setHasPermission] = useState(false);
     const [isFlashing, setIsFlashing] = useState(false);
-    const [flash, setFlash] = useState<'off' | 'on' | 'auto' | 'always'>('off');
     const [zoom, setZoom] = useState(1);
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
     const [lastPhoto, setLastPhoto] = useState<string | null>(null);
     const [showGallery, setShowGallery] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
     const [retakeTarget, setRetakeTarget] = useState<{ sequence?: number; subSequence?: number; textLabel?: string } | null>(null);
     const [isRenaming, setIsRenaming] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
@@ -186,6 +218,43 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
 
     const zoomShared = useSharedValue(1);
     const startZoom = useSharedValue(1);
+
+    // Track if camera is ready (for torch initialization)
+    const [cameraReady, setCameraReady] = useState(false);
+
+    // Handle delayed torch activation for 'always' flash mode on startup
+    useEffect(() => {
+        if (initialFlashMode === 'always' && !cameraReady) {
+            // Delay to allow camera to initialize before enabling torch
+            const timer = setTimeout(() => {
+                setCameraReady(true);
+            }, 500);
+            return () => clearTimeout(timer);
+        } else {
+            setCameraReady(true);
+        }
+    }, [initialFlashMode]);
+
+    // Save last-used values when they change
+    useEffect(() => {
+        saveLastUsedState('captureMode', mode);
+    }, [mode]);
+
+    useEffect(() => {
+        saveLastUsedState('labelingMode', labelingMode);
+    }, [labelingMode]);
+
+    useEffect(() => {
+        saveLastUsedState('flashMode', flash);
+    }, [flash]);
+
+    useEffect(() => {
+        saveLastUsedState('cameraPosition', cameraPosition);
+    }, [cameraPosition]);
+
+    useEffect(() => {
+        saveLastUsedState('shutterPositions', shutterPositions);
+    }, [shutterPositions]);
 
     const pinchGesture = Gesture.Pinch()
         .onStart(() => {
@@ -340,11 +409,17 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
         }
     };
 
-    const renderIcon = (type: 'grouped' | 'flash' | 'switch' | 'lenses', active?: boolean) => {
+    const renderIcon = (type: 'grouped' | 'flash' | 'switch' | 'lenses' | 'settings', active?: boolean) => {
         const color = (type === 'flash' && active) ? '#FFD700' : '#fff';
         const fontSize = 10;
 
         switch (type) {
+            case 'settings':
+                return (
+                    <View style={styles.iconContainer}>
+                        <MaterialIcons name="settings" size={28} color={color} />
+                    </View>
+                );
             case 'grouped':
                 let labelText = '通常';
                 if (labelingMode === 'numbered-group') labelText = 'グループ';
@@ -493,6 +568,28 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                 style={styles.miniIconButton}
             >
                 {renderIcon('switch')}
+            </TouchableOpacity>
+        </View>
+    );
+
+    const renderSettingsButton = () => (
+        <View style={[
+            styles.settingsButtonContainer,
+            isLandscape ? {
+                // Landscape: Bottom-left corner
+                left: 0,
+                bottom: 0,
+            } : {
+                // Portrait: Top-left corner
+                left: 0,
+                top: 0,
+            }
+        ]}>
+            <TouchableOpacity
+                onPress={() => setShowSettings(true)}
+                style={styles.miniIconButton}
+            >
+                {renderIcon('settings')}
             </TouchableOpacity>
         </View>
     );
@@ -926,7 +1023,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                                 photo={true}
                                 video={true}
                                 audio={true}
-                                torch={flash === 'always' ? 'on' : 'off'}
+                                torch={isForeground && cameraReady && flash === 'always' ? 'on' : 'off'}
                                 // codeScanner={codeScanner}
                                 animatedProps={animatedProps}
                                 videoStabilizationMode="off"
@@ -1049,6 +1146,7 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
 
 
                     {renderTopControls()}
+                    {renderSettingsButton()}
 
                     {isLandscape && (
                         <View style={styles.landscapeSecondaryContainer}>
@@ -1337,6 +1435,24 @@ const CameraView: React.FC<Props> = ({ currentFolder, onOpenFolders, onRenameFol
                     />
                 </View>
             )}
+
+            <SettingsModal
+                visible={showSettings}
+                onClose={() => setShowSettings(false)}
+                currentValues={{
+                    folder: currentFolder,
+                    shutterPositions: shutterPositions,
+                    labelingMode: labelingMode,
+                    captureMode: mode,
+                    flashMode: flash,
+                    cameraPosition: cameraPosition,
+                }}
+                onSettingsChange={(settings) => {
+                    if (onSettingsChange) {
+                        onSettingsChange(settings);
+                    }
+                }}
+            />
         </View>
     );
 };
@@ -2075,6 +2191,36 @@ const styles = StyleSheet.create({
         width: 4,
         height: 4,
         borderRadius: 2,
+    },
+    settingsIconContainer: {
+        width: 28,
+        height: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    gearTooth: {
+        position: 'absolute',
+        width: 6,
+        height: 8,
+        borderRadius: 1,
+    },
+    settingsGear: {
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    settingsGearCenter: {
+        width: 5,
+        height: 5,
+        borderRadius: 2.5,
+    },
+    settingsButtonContainer: {
+        position: 'absolute',
+        zIndex: 10,
+        height: 50,
+        justifyContent: 'center',
     },
     recordingTimerContainer: {
         flexDirection: 'row',
