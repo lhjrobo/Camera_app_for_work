@@ -349,7 +349,7 @@ const CameraView: React.FC<Props> = ({
                     : (labelingMode === 'text-group' ? textLabel : undefined);
 
                 let filename: string;
-                if (isRoot) {
+                if (isRoot || labelingMode === 'single') {
                     filename = formatTimestampFilename('.jpg');
                 } else {
                     filename = await getUniqueFilename(currentFolder.path, targetSeq, targetSub, targetText);
@@ -371,7 +371,7 @@ const CameraView: React.FC<Props> = ({
                     if (labelingMode === 'text-group' && !usedLabels.includes(textLabel)) {
                         setUsedLabels(prev => [...prev, textLabel]);
                     }
-                } else {
+                } else if (labelingMode !== 'single') {
                     setSequence(s => s + 1);
                 }
             } catch (e) {
@@ -1018,7 +1018,8 @@ const CameraView: React.FC<Props> = ({
                             />
 
                             {/* Next label overlay inside camera - landscape only */}
-                            {isLandscape && !isRoot && (
+                            {/* Next label overlay inside camera - landscape only */}
+                            {isLandscape && !isRoot && labelingMode !== 'single' && (
                                 <View style={styles.cameraInfoOverlayRight} pointerEvents="box-none">
                                     {retakeTarget && (
                                         <TouchableOpacity
@@ -1038,7 +1039,7 @@ const CameraView: React.FC<Props> = ({
                                         <Text style={styles.filenameIndicatorText}>
                                             Next: {formatFilename(
                                                 retakeTarget?.sequence ?? sequence,
-                                                retakeTarget ? retakeTarget.subSequence : (labelingMode !== 'single' ? subSequence : undefined),
+                                                retakeTarget ? retakeTarget.subSequence : subSequence,
                                                 retakeTarget ? retakeTarget.textLabel : (labelingMode === 'text-group' ? textLabel : undefined)
                                             ).replace('.jpg', '')} ✎
                                         </Text>
@@ -1181,7 +1182,7 @@ const CameraView: React.FC<Props> = ({
                                 </TouchableOpacity>
                             )}
 
-                            {!isLandscape && !isRoot && (
+                            {!isLandscape && !isRoot && labelingMode !== 'single' && (
                                 <TouchableOpacity
                                     style={styles.filenameIndicator}
                                     onPress={retakeTarget ? undefined : openIndexEditor}
@@ -1190,7 +1191,7 @@ const CameraView: React.FC<Props> = ({
                                     <Text style={styles.filenameIndicatorText}>
                                         Next: {formatFilename(
                                             retakeTarget?.sequence ?? sequence,
-                                            retakeTarget ? retakeTarget.subSequence : (labelingMode !== 'single' ? subSequence : undefined),
+                                            retakeTarget ? retakeTarget.subSequence : subSequence,
                                             retakeTarget ? retakeTarget.textLabel : (labelingMode === 'text-group' ? textLabel : undefined)
                                         ).replace('.jpg', '')} ✎
                                     </Text>
