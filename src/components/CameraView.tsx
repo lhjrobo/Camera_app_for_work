@@ -249,8 +249,10 @@ const CameraView: React.FC<Props> = ({
             startZoom.value = zoomShared.value;
         })
         .onUpdate((event) => {
+            const minZoom = device?.minZoom ?? 1;
+            const maxZoom = device?.maxZoom ?? 10;
             const newZoom = startZoom.value * event.scale;
-            zoomShared.value = Math.max(1, Math.min(newZoom, 10)); // Max zoom 10
+            zoomShared.value = Math.max(minZoom, Math.min(newZoom, maxZoom));
             runOnJS(setZoom)(zoomShared.value);
         });
 
@@ -1153,7 +1155,8 @@ const CameraView: React.FC<Props> = ({
                             )}
                             <View style={styles.zoomVerticalStack}>
                                 <TouchableOpacity onPress={() => {
-                                    const newZoom = Math.min(10, zoom + 0.5);
+                                    const maxZoom = device?.maxZoom ?? 10;
+                                    const newZoom = Math.min(maxZoom, zoom + 0.5);
                                     setZoom(newZoom);
                                     zoomShared.value = newZoom;
                                 }} style={styles.zoomButton}>
@@ -1161,7 +1164,8 @@ const CameraView: React.FC<Props> = ({
                                 </TouchableOpacity>
                                 <Text style={styles.zoomValueText}>{zoom.toFixed(1)}x</Text>
                                 <TouchableOpacity onPress={() => {
-                                    const newZoom = Math.max(1, zoom - 0.5);
+                                    const minZoom = device?.minZoom ?? 1;
+                                    const newZoom = Math.max(minZoom, zoom - 0.5);
                                     setZoom(newZoom);
                                     zoomShared.value = newZoom;
                                 }} style={styles.zoomButton}>
