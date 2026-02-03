@@ -9,6 +9,7 @@ import {
   Alert,
   PermissionsAndroid,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { initStorage, createNewSessionFolder, renameFolder, BASE_DIR, requestStoragePermission, saveLastFolder, getLastFolder } from './src/utils/StorageUtils';
 import RNFS from 'react-native-fs';
@@ -174,6 +175,20 @@ const App = () => {
     }
     setShowFolderSelector(false);
   };
+
+  // Handle hardware back button for folder selector
+  useEffect(() => {
+    const onBackPress = () => {
+      if (showFolderSelector) {
+        handleBack();
+        return true;
+      }
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [showFolderSelector, currentFolder]);
 
   const handleSettingsChange = (settings: AppSettings) => {
     setAppSettings(settings);

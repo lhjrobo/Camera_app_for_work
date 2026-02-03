@@ -21,6 +21,7 @@ import {
     Platform,
     AppState,
     AppStateStatus,
+    BackHandler,
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCodeScanner } from 'react-native-vision-camera';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -200,6 +201,7 @@ const CameraView: React.FC<Props> = ({
     const [indexWarning, setIndexWarning] = useState<string | null>(null);
     const focusAnim = useRef(new Animated.Value(0)).current;
     const takePhotoRef = useRef<() => void>(() => { });
+
     const toggleRecordingRef = useRef<() => void>(() => { });
 
     const zoomShared = useSharedValue(1);
@@ -675,6 +677,12 @@ const CameraView: React.FC<Props> = ({
             KeyEvent.removeKeyDownListener();
         };
     }, [mode, showGallery]); // Re-subscribe when mode or gallery visibility changes
+
+    // Fallback BackHandler in parent to prevent app exit if Gallery is open
+    // Note: MediaGallery handles its own back press when mounted, so we just need
+    // to ensure we don't double-handle or exit unexpectedly. 
+    // Since MediaGallery is conditional, its listener is added/removed automatically.
+
 
     // Hide system volume UI only when camera is active (not showing gallery)
     useEffect(() => {
@@ -1408,6 +1416,7 @@ const CameraView: React.FC<Props> = ({
 
             {showGallery && (
                 <View style={StyleSheet.absoluteFill}>
+
                     <MediaGallery
                         folderPath={currentFolder.path}
                         onClose={() => {
@@ -1421,7 +1430,9 @@ const CameraView: React.FC<Props> = ({
                         onRetake={(target) => setRetakeTarget(target)}
                     />
                 </View>
-            )}
+
+            )
+            }
 
             <SettingsModal
                 visible={showSettings}
@@ -1440,7 +1451,7 @@ const CameraView: React.FC<Props> = ({
                     }
                 }}
             />
-        </View>
+        </View >
     );
 };
 

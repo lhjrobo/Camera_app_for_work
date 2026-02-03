@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import {
     View,
     StyleSheet,
@@ -11,13 +11,15 @@ import {
     Alert,
     SafeAreaView,
     useWindowDimensions,
+    BackHandler,
 } from 'react-native';
 import Video from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { listPhotos, deleteFile, parseFilename } from '../utils/StorageUtils';
+import { listPhotos, deleteFile, parseFilename, getFolderBaseName } from '../utils/StorageUtils';
 import type { ReadDirItem } from 'react-native-fs';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView, Directions } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
+import FolderSelector from './FolderSelector';
 
 const COLUMN_COUNT_PORTRAIT = 3;
 const COLUMN_COUNT_LANDSCAPE = 6;
@@ -28,13 +30,15 @@ interface Props {
     onRetake: (target: { sequence?: number; subSequence?: number; textLabel?: string }) => void;
 }
 
-const ZoomableImage = ({ uri }: { uri: string }) => {
+const ZoomableImage = ({ uri, onNext, onPrevious }: { uri: string; onNext: () => void; onPrevious: () => void }) => {
     const scale = useSharedValue(1);
     const savedScale = useSharedValue(1);
     const translateX = useSharedValue(0);
     const savedTranslateX = useSharedValue(0);
     const translateY = useSharedValue(0);
     const savedTranslateY = useSharedValue(0);
+
+    const { width } = useWindowDimensions();
 
     const pinch = Gesture.Pinch()
         .onUpdate((e) => {
@@ -57,9 +61,25 @@ const ZoomableImage = ({ uri }: { uri: string }) => {
                 translateY.value = savedTranslateY.value + e.translationY;
             }
         })
-        .onEnd(() => {
+        .onEnd((e) => {
             savedTranslateX.value = translateX.value;
             savedTranslateY.value = translateY.value;
+        });
+
+    const swipeLeft = Gesture.Fling()
+        .direction(Directions.LEFT)
+        .onEnd(() => {
+            if (scale.value === 1) {
+                runOnJS(onNext)();
+            }
+        });
+
+    const swipeRight = Gesture.Fling()
+        .direction(Directions.RIGHT)
+        .onEnd(() => {
+            if (scale.value === 1) {
+                runOnJS(onPrevious)();
+            }
         });
 
     const doubleTap = Gesture.Tap()
@@ -79,7 +99,16 @@ const ZoomableImage = ({ uri }: { uri: string }) => {
         });
 
     const composed = Gesture.Simultaneous(pinch, pan);
-    const gesture = Gesture.Race(doubleTap, composed);
+    // Exclusive: if double tap fails, try flings.
+    // If flings fail or don't match (zoomed in), try composed.
+    // Actually, Race might be better for separate modes, but we want Simultaneous for pan+pinch.
+    // Simplify:
+    // If scale > 1, use pinch+pan + doubletap
+    // If scale == 1, use fling + doubletap (and pinch starts zoom)
+
+    // Using Race(doubleTap, ...others) handles the delay for double tap.
+    // We can combine swipes with composed.
+    const gestures = Gesture.Race(doubleTap, Gesture.Simultaneous(swipeLeft, swipeRight, composed));
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [
@@ -90,7 +119,7 @@ const ZoomableImage = ({ uri }: { uri: string }) => {
     }));
 
     return (
-        <GestureDetector gesture={gesture}>
+        <GestureDetector gesture={gestures}>
             <Animated.Image
                 source={{ uri }}
                 style={[styles.fullImage, animatedStyle]}
@@ -100,30 +129,74 @@ const ZoomableImage = ({ uri }: { uri: string }) => {
     );
 };
 
+
 const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
     const numColumns = isLandscape ? COLUMN_COUNT_LANDSCAPE : COLUMN_COUNT_PORTRAIT;
     const itemSize = width / numColumns;
     const insets = useSafeAreaInsets();
+    const [currentBrowsingPath, setCurrentBrowsingPath] = useState(folderPath); // Local state for browsing
     const [photos, setPhotos] = useState<ReadDirItem[]>([]);
     const [selectedPhoto, setSelectedPhoto] = useState<ReadDirItem | null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [showFolderSelector, setShowFolderSelector] = useState(false);
     const videoRef = useRef<any>(null);
+
+    // Track state in ref for BackHandler
+    const stateRef = useRef({
+        showFolderSelector,
+        selectedPhoto,
+        selectionMode,
+        onClose
+    });
+
+    useEffect(() => {
+        stateRef.current = {
+            showFolderSelector,
+            selectedPhoto,
+            selectionMode,
+            onClose
+        };
+    }, [showFolderSelector, selectedPhoto, selectionMode, onClose]);
+
+    useEffect(() => {
+        const onBackPress = () => {
+            const state = stateRef.current;
+            if (state.showFolderSelector) {
+                setShowFolderSelector(false);
+                return true;
+            }
+            if (state.selectedPhoto) {
+                setSelectedPhoto(null);
+                return true;
+            }
+            if (state.selectionMode) {
+                setSelectionMode(false);
+                setSelectedItems(new Set());
+                return true;
+            }
+            state.onClose();
+            return true;
+        };
+
+        const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+        return () => subscription.remove();
+    }, []); // Run once on mount
 
     const isVideo = (item: ReadDirItem | null) => {
         return item?.name.toLowerCase().endsWith('.mp4');
     };
 
     const loadPhotos = async () => {
-        const list = await listPhotos(folderPath);
+        const list = await listPhotos(currentBrowsingPath);
         setPhotos(list);
     };
 
     useEffect(() => {
         loadPhotos();
-    }, [folderPath]);
+    }, [currentBrowsingPath]); // Reload when browsing path changes
 
     const handleRetake = () => {
         if (selectedPhoto) {
@@ -219,6 +292,22 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
         setSelectedItems(new Set(photos.map(p => p.path)));
     };
 
+    const handleNext = () => {
+        if (!selectedPhoto) return;
+        const index = photos.findIndex(p => p.path === selectedPhoto.path);
+        if (index >= 0 && index < photos.length - 1) {
+            setSelectedPhoto(photos[index + 1]);
+        }
+    };
+
+    const handlePrevious = () => {
+        if (!selectedPhoto) return;
+        const index = photos.findIndex(p => p.path === selectedPhoto.path);
+        if (index > 0) {
+            setSelectedPhoto(photos[index - 1]);
+        }
+    };
+
     const renderItem = ({ item }: { item: ReadDirItem }) => (
         <TouchableOpacity
             style={[
@@ -281,16 +370,28 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                     ) : (
                         <>
                             <TouchableOpacity onPress={onClose} style={styles.backButton}>
-                                <Text style={styles.backButtonText}>← Back</Text>
+                                <Text style={styles.backButtonText}>← Capture</Text>
                             </TouchableOpacity>
-                            <View style={styles.titleContainer} pointerEvents="none">
-                                <Text style={styles.title}>Gallery</Text>
-                            </View>
+                            <TouchableOpacity
+                                style={styles.titleContainer}
+                                onPress={() => setShowFolderSelector(true)}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <Text style={styles.title}>
+                                        {currentBrowsingPath === folderPath
+                                            ? 'Gallery'
+                                            : getFolderBaseName(currentBrowsingPath)}
+                                    </Text>
+                                    <Text style={[styles.title, { marginLeft: 6, fontSize: 12 }]}>▼</Text>
+                                </View>
+                            </TouchableOpacity>
                             <View style={styles.headerRight} />
                         </>
                     )}
                 </View>
             </View>
+
+
 
             <FlatList
                 data={photos}
@@ -304,6 +405,21 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
             {photos.length === 0 && (
                 <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>No media in this folder yet.</Text>
+                </View>
+            )}
+
+            {showFolderSelector && (
+                <View style={[StyleSheet.absoluteFill, { zIndex: 100 }]}>
+                    <FolderSelector
+                        currentFolderName={getFolderBaseName(currentBrowsingPath)}
+                        onSelect={(folder) => {
+                            setCurrentBrowsingPath(folder.path);
+                            setShowFolderSelector(false);
+                            // Note: we do NOT update the parent's currentFolder (onFolderChange)
+                            // This ensures new captures still go to the original folder.
+                        }}
+                        onBack={() => setShowFolderSelector(false)}
+                    />
                 </View>
             )}
 
@@ -357,7 +473,11 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                                     repeat={false}
                                 />
                             ) : (
-                                <ZoomableImage uri={`file://${selectedPhoto.path}`} />
+                                <ZoomableImage
+                                    uri={`file://${selectedPhoto.path}`}
+                                    onNext={handleNext}
+                                    onPrevious={handlePrevious}
+                                />
                             )
                         )}
                     </View>
