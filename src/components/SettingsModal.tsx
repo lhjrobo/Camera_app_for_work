@@ -301,7 +301,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                 />
 
                                 <SettingRow
-                                    label="撮影モード"
+                                    label="撮影モード(写真/動画)"
                                     mode={settings.captureMode}
                                     onModeChange={(mode) => updateSetting('captureMode', mode)}
                                     currentValueLabel={currentValues.captureMode === 'photo' ? '写真' : '動画'}
@@ -317,14 +317,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                 />
 
                                 <SettingRow
-                                    label="カメラ"
-                                    mode={settings.cameraModeMode}
-                                    onModeChange={(mode) => updateSetting('cameraModeMode', mode)}
-                                    currentValueLabel={currentValues.cameraPosition === 'back' ? '背面' : '前面'}
-                                    defaultValueLabel="背面"
-                                />
-                                <SettingRow
-                                    label="カメラ"
+                                    label="カメラ(背面/前面)"
                                     mode={settings.cameraModeMode}
                                     onModeChange={(mode) => updateSetting('cameraModeMode', mode)}
                                     currentValueLabel={currentValues.cameraPosition === 'back' ? '背面' : '前面'}
