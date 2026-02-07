@@ -30,25 +30,45 @@ interface Props {
     onRetake: (target: { sequence?: number; subSequence?: number; textLabel?: string }) => void;
 }
 
-const ZoomableImage = ({ uri, onNext, onPrevious }: { uri: string; onNext: () => void; onPrevious: () => void }) => {
+const ZoomableImage = ({ uri, onZoomChange }: { uri: string; onZoomChange: (isZoomed: boolean) => void }) => {
     const scale = useSharedValue(1);
     const savedScale = useSharedValue(1);
     const translateX = useSharedValue(0);
     const savedTranslateX = useSharedValue(0);
     const translateY = useSharedValue(0);
     const savedTranslateY = useSharedValue(0);
+    const isZoomedShared = useSharedValue(false);
 
     const { width } = useWindowDimensions();
+    const [isZoomed, setIsZoomed] = useState(false);
+
+    const handleZoomChange = (zoomed: boolean) => {
+        setIsZoomed(zoomed);
+        onZoomChange(zoomed);
+    };
 
     const pinch = Gesture.Pinch()
         .onUpdate((e) => {
             scale.value = savedScale.value * e.scale;
+            if (scale.value > 1.1 && !isZoomedShared.value) {
+                isZoomedShared.value = true;
+                runOnJS(handleZoomChange)(true);
+            }
         })
         .onEnd(() => {
             if (scale.value < 1) {
                 scale.value = withTiming(1);
                 translateX.value = withTiming(0);
                 translateY.value = withTiming(0);
+                isZoomedShared.value = false;
+                runOnJS(handleZoomChange)(false);
+            } else if (scale.value <= 1.05) {
+                // Almost 1, reset to be safe
+                scale.value = withTiming(1);
+                translateX.value = withTiming(0);
+                translateY.value = withTiming(0);
+                isZoomedShared.value = false;
+                runOnJS(handleZoomChange)(false);
             }
             savedScale.value = scale.value;
         });
@@ -66,21 +86,7 @@ const ZoomableImage = ({ uri, onNext, onPrevious }: { uri: string; onNext: () =>
             savedTranslateY.value = translateY.value;
         });
 
-    const swipeLeft = Gesture.Fling()
-        .direction(Directions.LEFT)
-        .onEnd(() => {
-            if (scale.value === 1) {
-                runOnJS(onNext)();
-            }
-        });
 
-    const swipeRight = Gesture.Fling()
-        .direction(Directions.RIGHT)
-        .onEnd(() => {
-            if (scale.value === 1) {
-                runOnJS(onPrevious)();
-            }
-        });
 
     const doubleTap = Gesture.Tap()
         .numberOfTaps(2)
@@ -92,23 +98,19 @@ const ZoomableImage = ({ uri, onNext, onPrevious }: { uri: string; onNext: () =>
                 savedScale.value = 1;
                 savedTranslateX.value = 0;
                 savedTranslateY.value = 0;
+                isZoomedShared.value = false;
+                runOnJS(handleZoomChange)(false);
             } else {
                 scale.value = withTiming(2);
                 savedScale.value = 2;
+                isZoomedShared.value = true;
+                runOnJS(handleZoomChange)(true);
             }
         });
 
-    const composed = Gesture.Simultaneous(pinch, pan);
-    // Exclusive: if double tap fails, try flings.
-    // If flings fail or don't match (zoomed in), try composed.
-    // Actually, Race might be better for separate modes, but we want Simultaneous for pan+pinch.
-    // Simplify:
-    // If scale > 1, use pinch+pan + doubletap
-    // If scale == 1, use fling + doubletap (and pinch starts zoom)
-
-    // Using Race(doubleTap, ...others) handles the delay for double tap.
-    // We can combine swipes with composed.
-    const gestures = Gesture.Race(doubleTap, Gesture.Simultaneous(swipeLeft, swipeRight, composed));
+    const composed = isZoomed
+        ? Gesture.Race(doubleTap, Gesture.Simultaneous(pinch, pan))
+        : Gesture.Race(doubleTap, pinch);
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [
@@ -119,10 +121,13 @@ const ZoomableImage = ({ uri, onNext, onPrevious }: { uri: string; onNext: () =>
     }));
 
     return (
-        <GestureDetector gesture={gestures}>
+        <GestureDetector gesture={composed}>
             <Animated.Image
                 source={{ uri }}
-                style={[styles.fullImage, animatedStyle]}
+                style={[
+                    { width: width, height: '100%' },
+                    animatedStyle,
+                ]}
                 resizeMode="contain"
             />
         </GestureDetector>
@@ -130,18 +135,59 @@ const ZoomableImage = ({ uri, onNext, onPrevious }: { uri: string; onNext: () =>
 };
 
 
+
+const GalleryVideo = ({ uri, isFocused }: { uri: string; isFocused: boolean }) => {
+    const [isPlaying, setIsPlaying] = useState(false);
+    const { width } = useWindowDimensions();
+
+    useEffect(() => {
+        if (!isFocused) {
+            setIsPlaying(false);
+        }
+    }, [isFocused]);
+
+    return (
+        <View style={{ width, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+            <Video
+                source={{ uri }}
+                style={{ width, height: '100%' }}
+                controls={isPlaying}
+                resizeMode="contain"
+                paused={!isPlaying}
+                onEnd={() => setIsPlaying(false)}
+                repeat={false}
+            />
+            {!isPlaying && (
+                <TouchableOpacity
+                    style={styles.playOverlayButton}
+                    onPress={() => setIsPlaying(true)}
+                >
+                    <View style={styles.playOverlayCircle}>
+                        <Text style={styles.playOverlayIcon}>▶</Text>
+                    </View>
+                </TouchableOpacity>
+            )}
+        </View>
+    );
+};
+
 const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
-    const { width, height } = useWindowDimensions();
-    const isLandscape = width > height;
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const isLandscape = windowWidth > windowHeight;
     const numColumns = isLandscape ? COLUMN_COUNT_LANDSCAPE : COLUMN_COUNT_PORTRAIT;
-    const itemSize = width / numColumns;
+    const itemSize = windowWidth / numColumns;
     const insets = useSafeAreaInsets();
-    const [currentBrowsingPath, setCurrentBrowsingPath] = useState(folderPath); // Local state for browsing
     const [photos, setPhotos] = useState<ReadDirItem[]>([]);
-    const [selectedPhoto, setSelectedPhoto] = useState<ReadDirItem | null>(null);
+    // numColumns state removed (derived above)
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [selectedPhoto, setSelectedPhoto] = useState<ReadDirItem | null>(null);
     const [showFolderSelector, setShowFolderSelector] = useState(false);
+    const [currentBrowsingPath, setCurrentBrowsingPath] = useState(folderPath); // Track which folder we are viewing
+
+    // Smooth Swipe State
+    const [scrollEnabled, setScrollEnabled] = useState(true);
+    const flatListRef = useRef<FlatList>(null);
     const videoRef = useRef<any>(null);
 
     // Track state in ref for BackHandler
@@ -463,22 +509,50 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                         </View>
 
                         {selectedPhoto && (
-                            isVideo(selectedPhoto) ? (
-                                <Video
-                                    ref={videoRef}
-                                    source={{ uri: `file://${selectedPhoto.path}` }}
-                                    style={styles.fullVideo}
-                                    controls={true}
-                                    resizeMode="contain"
-                                    repeat={false}
-                                />
-                            ) : (
-                                <ZoomableImage
-                                    uri={`file://${selectedPhoto.path}`}
-                                    onNext={handleNext}
-                                    onPrevious={handlePrevious}
-                                />
-                            )
+                            <FlatList
+                                ref={flatListRef}
+                                data={photos}
+                                horizontal
+                                pagingEnabled
+                                showsHorizontalScrollIndicator={false}
+                                scrollEnabled={scrollEnabled}
+                                initialScrollIndex={photos.findIndex(p => p.path === selectedPhoto.path)}
+                                getItemLayout={(data, index) => ({
+                                    length: windowWidth,
+                                    offset: windowWidth * index,
+                                    index,
+                                })}
+                                keyExtractor={(item) => item.path}
+                                renderItem={({ item }) => (
+                                    <View style={{ width: windowWidth, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                                        {isVideo(item) ? (
+                                            <GalleryVideo
+                                                uri={`file://${item.path}`}
+                                                isFocused={selectedPhoto.path === item.path}
+                                            />
+                                        ) : (
+                                            <ZoomableImage
+                                                uri={`file://${item.path}`}
+                                                onZoomChange={(isZoomed) => setScrollEnabled(!isZoomed)}
+                                            />
+                                        )}
+                                    </View>
+                                )}
+                                onMomentumScrollEnd={(event) => {
+                                    const offsetX = event.nativeEvent.contentOffset.x;
+                                    const index = Math.round(offsetX / windowWidth);
+                                    if (photos[index]) {
+                                        setSelectedPhoto(photos[index]);
+                                    }
+                                }}
+                                // Ensure layout is calculated before initial scroll
+                                onScrollToIndexFailed={(info) => {
+                                    const wait = new Promise<void>(resolve => setTimeout(resolve, 500));
+                                    wait.then(() => {
+                                        flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
+                                    });
+                                }}
+                            />
                         )}
                     </View>
                 </GestureHandlerRootView>
@@ -608,6 +682,25 @@ const styles = StyleSheet.create({
     fullVideo: {
         flex: 1,
         width: '100%',
+    },
+    playOverlayButton: {
+        position: 'absolute',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 20,
+    },
+    playOverlayCircle: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    playOverlayIcon: {
+        color: '#fff',
+        fontSize: 40,
+        marginLeft: 5, // Optically center the triangle
     },
     videoThumbnail: {
         flex: 1,

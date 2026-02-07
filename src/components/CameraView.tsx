@@ -983,12 +983,14 @@ const CameraView: React.FC<Props> = ({
             {isRecording && (
                 <TouchableOpacity
                     onPress={takeSnapshot}
-                    style={[styles.snapshotButton, styles.snapshotButtonPortrait]}
+                    style={styles.snapshotButtonPortraitSide}
                     activeOpacity={0.7}
                 >
                     <View style={styles.snapshotInner} />
                 </TouchableOpacity>
             )}
+
+
 
             <View style={[styles.rightActionContainer, styles.rightActionContainerPortrait]}>
                 {renderSettingsGrid()}
@@ -1031,15 +1033,7 @@ const CameraView: React.FC<Props> = ({
                     onPositionChange={updateShutterPosition}
                 />
 
-                {isRecording && (
-                    <TouchableOpacity
-                        onPress={takeSnapshot}
-                        style={[styles.snapshotButton, styles.snapshotButtonLandscape]}
-                        activeOpacity={0.7}
-                    >
-                        <View style={styles.snapshotInner} />
-                    </TouchableOpacity>
-                )}
+
             </View>
 
             {/* Bottom: Gallery Button */}
@@ -1142,6 +1136,18 @@ const CameraView: React.FC<Props> = ({
                                 </View>
                             )}
 
+                            {/* Snapshot Button Overlay - Bottom Right (Landscape Only) */}
+                            {isLandscape && isRecording && (
+                                <View style={styles.cameraInfoOverlayBottomRight} pointerEvents="box-none">
+                                    <TouchableOpacity
+                                        onPress={takeSnapshot}
+                                        style={styles.snapshotButtonOverlay}
+                                        activeOpacity={0.7}
+                                    >
+                                        <View style={styles.snapshotInner} />
+                                    </TouchableOpacity>
+                                </View>
+                            )}
                         </View>
                     </TouchableWithoutFeedback>
                 </Reanimated.View>
@@ -2320,6 +2326,30 @@ const styles = StyleSheet.create({
     snapshotButtonLandscape: {
         right: 120, // to the left of shutter column
         alignSelf: 'center',
+    },
+    snapshotButtonOverlay: {
+        width: 60,
+        height: 60,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    snapshotButtonPortraitSide: {
+        position: 'absolute',
+        left: '50%',
+        marginLeft: 60, // To the right of center
+        top: 20, // (100 - 60) / 2 = Centered vertically in actionRow
+        width: 60,
+        height: 60,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 50,
+    },
+    cameraInfoOverlayBottomRight: {
+        position: 'absolute',
+        bottom: 20,
+        right: 20,
+        zIndex: 50,
+        alignItems: 'flex-end',
     },
     snapshotInner: {
         width: 50,
