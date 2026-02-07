@@ -174,6 +174,10 @@ const CameraView: React.FC<Props> = ({
     const [textLabel, setTextLabel] = useState('');
     const [isEnteringLabel, setIsEnteringLabel] = useState(false);
 
+    // Snapshot Feature
+    const [currentRecordingBase, setCurrentRecordingBase] = useState<string | null>(null);
+    const [snapshotIndex, setSnapshotIndex] = useState(1);
+
     const cameraAspectRatio = useMemo(() => {
         if (isLandscape) {
             return mode === 'photo' ? 4 / 3 : 16 / 9;
@@ -623,6 +627,11 @@ const CameraView: React.FC<Props> = ({
                 }
             }
 
+            // Set base filename for snapshots before extension
+            const baseName = filename.replace(/\.mp4$/i, '');
+            setCurrentRecordingBase(baseName);
+            setSnapshotIndex(1);
+
             setIsRecording(true);
             camera.current?.startRecording({
                 onRecordingFinished: async (video) => {
@@ -650,6 +659,35 @@ const CameraView: React.FC<Props> = ({
             });
         }
     }, [isRecording, camera, labelingMode, subSequence, textLabel, sequence, currentFolder]);
+
+    const generateUUID = () => {
+        return Math.random().toString(36).substring(2, 10);
+    };
+
+    const takeSnapshot = useCallback(async () => {
+        if (!isRecording || !currentRecordingBase || !camera.current) return;
+
+        try {
+            // Visual feedback
+            setIsFlashing(true);
+            setTimeout(() => setIsFlashing(false), 100);
+
+            const photo = await camera.current.takePhoto({
+                flash: 'off', // Force flash off for snapshot during video to avoid glitch? Or follow setting? 
+                // Usually flash unavailable during recording. Force off is safer.
+            });
+
+            const uuid = generateUUID();
+            const snapshotFilename = `${currentRecordingBase}_${snapshotIndex}_${uuid}.jpg`;
+
+            await saveFile(photo.path, currentFolder.path, snapshotFilename);
+            console.log(`Snapshot saved: ${snapshotFilename}`);
+
+            setSnapshotIndex(prev => prev + 1);
+        } catch (e) {
+            console.error('Snapshot failed:', e);
+        }
+    }, [isRecording, currentRecordingBase, snapshotIndex, currentFolder]);
 
     // Keep toggleRecordingRef updated with latest callback
     useEffect(() => {
@@ -942,6 +980,16 @@ const CameraView: React.FC<Props> = ({
                 onPositionChange={updateShutterPosition}
             />
 
+            {isRecording && (
+                <TouchableOpacity
+                    onPress={takeSnapshot}
+                    style={[styles.snapshotButton, styles.snapshotButtonPortrait]}
+                    activeOpacity={0.7}
+                >
+                    <View style={styles.snapshotInner} />
+                </TouchableOpacity>
+            )}
+
             <View style={[styles.rightActionContainer, styles.rightActionContainerPortrait]}>
                 {renderSettingsGrid()}
             </View>
@@ -982,6 +1030,16 @@ const CameraView: React.FC<Props> = ({
                     initialPos={shutterPositions.landscape}
                     onPositionChange={updateShutterPosition}
                 />
+
+                {isRecording && (
+                    <TouchableOpacity
+                        onPress={takeSnapshot}
+                        style={[styles.snapshotButton, styles.snapshotButtonLandscape]}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.snapshotInner} />
+                    </TouchableOpacity>
+                )}
             </View>
 
             {/* Bottom: Gallery Button */}
@@ -2246,6 +2304,30 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         fontVariant: ['tabular-nums'],
+    },
+    snapshotButton: {
+        width: 60,
+        height: 60,
+        justifyContent: 'center',
+        alignItems: 'center',
+        position: 'absolute',
+        zIndex: 50,
+    },
+    snapshotButtonPortrait: {
+        bottom: 120, // ample space above typical shutter position
+        alignSelf: 'center',
+    },
+    snapshotButtonLandscape: {
+        right: 120, // to the left of shutter column
+        alignSelf: 'center',
+    },
+    snapshotInner: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: '#fff',
+        borderWidth: 2,
+        borderColor: 'rgba(0,0,0,0.1)',
     },
 });
 
