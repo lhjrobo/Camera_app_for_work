@@ -5,6 +5,7 @@ import {
     FlatList,
     Image,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     Text,
     Modal,
     Dimensions,
@@ -12,6 +13,7 @@ import {
     SafeAreaView,
     useWindowDimensions,
     BackHandler,
+    StatusBar,
 } from 'react-native';
 import Video from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,7 +32,7 @@ interface Props {
     onRetake: (target: { sequence?: number; subSequence?: number; textLabel?: string }) => void;
 }
 
-const ZoomableImage = ({ uri, onZoomChange }: { uri: string; onZoomChange: (isZoomed: boolean) => void }) => {
+const ZoomableImage = ({ uri, onZoomChange, onToggleUI }: { uri: string; onZoomChange: (isZoomed: boolean) => void; onToggleUI: () => void }) => {
     const scale = useSharedValue(1);
     const savedScale = useSharedValue(1);
     const translateX = useSharedValue(0);
@@ -108,9 +110,17 @@ const ZoomableImage = ({ uri, onZoomChange }: { uri: string; onZoomChange: (isZo
             }
         });
 
+    const singleTap = Gesture.Tap()
+        .numberOfTaps(1)
+        .onEnd(() => {
+            runOnJS(onToggleUI)();
+        });
+
+    const taps = Gesture.Exclusive(doubleTap, singleTap);
+
     const composed = isZoomed
-        ? Gesture.Race(doubleTap, Gesture.Simultaneous(pinch, pan))
-        : Gesture.Race(doubleTap, pinch);
+        ? Gesture.Race(taps, Gesture.Simultaneous(pinch, pan))
+        : Gesture.Race(taps, pinch);
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [
@@ -136,7 +146,7 @@ const ZoomableImage = ({ uri, onZoomChange }: { uri: string; onZoomChange: (isZo
 
 
 
-const GalleryVideo = ({ uri, isFocused }: { uri: string; isFocused: boolean }) => {
+const GalleryVideo = ({ uri, isFocused, onToggleUI }: { uri: string; isFocused: boolean; onToggleUI: () => void }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const { width } = useWindowDimensions();
 
@@ -147,27 +157,29 @@ const GalleryVideo = ({ uri, isFocused }: { uri: string; isFocused: boolean }) =
     }, [isFocused]);
 
     return (
-        <View style={{ width, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-            <Video
-                source={{ uri }}
-                style={{ width, height: '100%' }}
-                controls={isPlaying}
-                resizeMode="contain"
-                paused={!isPlaying}
-                onEnd={() => setIsPlaying(false)}
-                repeat={false}
-            />
-            {!isPlaying && (
-                <TouchableOpacity
-                    style={styles.playOverlayButton}
-                    onPress={() => setIsPlaying(true)}
-                >
-                    <View style={styles.playOverlayCircle}>
-                        <Text style={styles.playOverlayIcon}>▶</Text>
-                    </View>
-                </TouchableOpacity>
-            )}
-        </View>
+        <TouchableWithoutFeedback onPress={onToggleUI}>
+            <View style={{ width, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                <Video
+                    source={{ uri }}
+                    style={{ width, height: '100%' }}
+                    controls={isPlaying}
+                    resizeMode="contain"
+                    paused={!isPlaying}
+                    onEnd={() => setIsPlaying(false)}
+                    repeat={false}
+                />
+                {!isPlaying && (
+                    <TouchableOpacity
+                        style={styles.playOverlayButton}
+                        onPress={() => setIsPlaying(true)}
+                    >
+                        <View style={styles.playOverlayCircle}>
+                            <Text style={styles.playOverlayIcon}>▶</Text>
+                        </View>
+                    </TouchableOpacity>
+                )}
+            </View>
+        </TouchableWithoutFeedback>
     );
 };
 
@@ -189,6 +201,7 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
     const [scrollEnabled, setScrollEnabled] = useState(true);
     const flatListRef = useRef<FlatList>(null);
     const videoRef = useRef<any>(null);
+    const [isUIVisible, setIsUIVisible] = useState(false);
 
     // Track state in ref for BackHandler
     const stateRef = useRef({
@@ -472,44 +485,19 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
             <Modal
                 visible={!!selectedPhoto}
                 transparent={false}
+                statusBarTranslucent={true}
                 animationType="fade"
-                onRequestClose={() => setSelectedPhoto(null)}
+                onRequestClose={() => {
+                    setSelectedPhoto(null);
+                    setIsUIVisible(false); // Reset visibility
+                }}
             >
                 <GestureHandlerRootView style={{ flex: 1 }}>
                     <View style={styles.viewerContainer}>
-                        <View style={[styles.viewerHeader, { paddingTop: Math.max(10, insets.top) }]}>
-                            <TouchableOpacity
-                                onPress={() => setSelectedPhoto(null)}
-                                style={styles.viewerButton}
-                            >
-                                <Text style={styles.viewerButtonText}>Close</Text>
-                            </TouchableOpacity>
-
-                            <View style={styles.viewerTitleContainer}>
-                                <Text style={styles.viewerTitle} numberOfLines={1}>
-                                    {selectedPhoto?.name}
-                                </Text>
-                            </View>
-
-                            {!isVideo(selectedPhoto) && (
-                                <TouchableOpacity
-                                    onPress={handleRetake}
-                                    style={[styles.viewerButton, styles.retakeButton]}
-                                >
-                                    <Text style={styles.viewerButtonText}>Retake</Text>
-                                </TouchableOpacity>
-                            )}
-
-                            <TouchableOpacity
-                                onPress={() => selectedPhoto && handleDelete(selectedPhoto)}
-                                style={[styles.viewerButton, styles.deleteButton]}
-                            >
-                                <Text style={styles.viewerButtonText}>Delete</Text>
-                            </TouchableOpacity>
-                        </View>
-
+                        <StatusBar hidden={!isUIVisible} translucent backgroundColor="transparent" barStyle="light-content" />
                         {selectedPhoto && (
                             <FlatList
+                                key={windowWidth} // Force remount on rotation to fix centering
                                 ref={flatListRef}
                                 data={photos}
                                 horizontal
@@ -529,11 +517,13 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                                             <GalleryVideo
                                                 uri={`file://${item.path}`}
                                                 isFocused={selectedPhoto.path === item.path}
+                                                onToggleUI={() => setIsUIVisible(v => !v)}
                                             />
                                         ) : (
                                             <ZoomableImage
                                                 uri={`file://${item.path}`}
                                                 onZoomChange={(isZoomed) => setScrollEnabled(!isZoomed)}
+                                                onToggleUI={() => setIsUIVisible(v => !v)}
                                             />
                                         )}
                                     </View>
@@ -554,10 +544,44 @@ const MediaGallery: React.FC<Props> = ({ folderPath, onClose, onRetake }) => {
                                 }}
                             />
                         )}
+
+                        {isUIVisible && (
+                            <View style={[styles.viewerHeader, { paddingTop: Math.max(10, insets.top) }]}>
+                                <TouchableOpacity
+                                    onPress={() => setSelectedPhoto(null)}
+                                    style={styles.viewerButton}
+                                >
+                                    <Text style={styles.viewerButtonText}>Close</Text>
+                                </TouchableOpacity>
+
+                                <View style={styles.viewerTitleContainer}>
+                                    <Text style={styles.viewerTitle} numberOfLines={1}>
+                                        {selectedPhoto?.name}
+                                    </Text>
+                                </View>
+
+                                {!isVideo(selectedPhoto) && (
+                                    <TouchableOpacity
+                                        onPress={handleRetake}
+                                        style={[styles.viewerButton, styles.retakeButton]}
+                                    >
+                                        <Text style={styles.viewerButtonText}>Retake</Text>
+                                    </TouchableOpacity>
+                                )}
+
+                                <TouchableOpacity
+                                    onPress={() => selectedPhoto && handleDelete(selectedPhoto)}
+                                    style={[styles.viewerButton, styles.deleteButton]}
+                                >
+                                    <Text style={styles.viewerButtonText}>Delete</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                     </View>
+
                 </GestureHandlerRootView>
             </Modal>
-        </View>
+        </View >
     );
 };
 
@@ -641,6 +665,11 @@ const styles = StyleSheet.create({
         backgroundColor: '#000',
     },
     viewerHeader: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: 'rgba(0,0,0,0.5)',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
