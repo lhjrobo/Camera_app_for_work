@@ -28,6 +28,10 @@ export interface AppSettings {
 
     cameraModeMode: 'default' | 'fixed' | 'lastUsed';
     fixedCameraPosition?: 'front' | 'back';
+
+    // Camera2 API settings
+    edgeMode: 'default' | 'off' | 'fast' | 'high_quality';
+    noiseReductionMode: 'default' | 'off' | 'minimal' | 'fast' | 'high_quality';
 }
 
 export const getDefaultSettings = (): AppSettings => ({
@@ -38,6 +42,8 @@ export const getDefaultSettings = (): AppSettings => ({
     captureMode: 'default',
     flashModeMode: 'default',
     cameraModeMode: 'default',
+    edgeMode: 'default',
+    noiseReductionMode: 'default',
 });
 
 export const loadSettings = async (): Promise<AppSettings> => {

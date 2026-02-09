@@ -19,6 +19,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppSettings, loadSettings, getLastUsedState } from './src/utils/SettingsStorage';
 import Orientation from 'react-native-orientation-locker';
+import { applyCamera2Settings } from './src/utils/Camera2Settings';
 
 const App = () => {
   const [currentFolder, setCurrentFolder] = useState<{ name: string; path: string } | null>(null);
@@ -139,6 +140,12 @@ const App = () => {
         }
       }
       // default: 'back'
+
+      // Apply Camera2 settings on startup
+      await applyCamera2Settings({
+        edgeMode: settings.edgeMode,
+        noiseReductionMode: settings.noiseReductionMode,
+      });
 
       setIsLoading(false);
     };

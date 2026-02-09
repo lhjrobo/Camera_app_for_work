@@ -13,6 +13,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { AppSettings, loadSettings, saveSettings } from '../utils/SettingsStorage';
 import { checkForUpdate, downloadAndInstallUpdate } from '../utils/UpdateService';
 import { version } from '../../package.json';
+import { applyCamera2Settings, debugCamera2Settings } from '../utils/Camera2Settings';
 
 interface SettingsModalProps {
     visible: boolean;
@@ -111,6 +112,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const handleSave = async () => {
         if (settings) {
             await saveSettings(settings);
+            // Apply Camera2 settings immediately
+            await applyCamera2Settings({
+                edgeMode: settings.edgeMode,
+                noiseReductionMode: settings.noiseReductionMode,
+            });
             onSettingsChange(settings);
         }
         onClose();
@@ -323,6 +329,82 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                     currentValueLabel={currentValues.cameraPosition === 'back' ? '背面' : '前面'}
                                     defaultValueLabel="背面"
                                 />
+                            </View>
+
+                            {/* Camera Processing Settings */}
+                            <View style={styles.section}>
+                                <Text style={styles.sectionTitle}>カメラ処理設定</Text>
+
+                                {/* Edge Mode */}
+                                <View style={styles.settingRow}>
+                                    <Text style={styles.settingLabel}>エッジ補正</Text>
+                                    <Text style={styles.toggleDescription}>輪郭の鮮明さを調整</Text>
+                                    <View style={styles.modeSelector}>
+                                        {(['default', 'off', 'fast', 'high_quality'] as const).map((mode) => (
+                                            <TouchableOpacity
+                                                key={mode}
+                                                style={[
+                                                    styles.modeButton,
+                                                    settings.edgeMode === mode && styles.modeButtonActive,
+                                                ]}
+                                                onPress={() => setSettings({ ...settings, edgeMode: mode })}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.modeButtonText,
+                                                        settings.edgeMode === mode && styles.modeButtonTextActive,
+                                                    ]}
+                                                >
+                                                    {mode === 'default' ? '自動' :
+                                                        mode === 'off' ? 'OFF' :
+                                                            mode === 'fast' ? '高速' : '高画質'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
+                                {/* Noise Reduction Mode */}
+                                <View style={styles.settingRow}>
+                                    <Text style={styles.settingLabel}>ノイズ除去</Text>
+                                    <Text style={styles.toggleDescription}>ノイズを軽減（処理負荷あり）</Text>
+                                    <View style={styles.modeSelector}>
+                                        {(['default', 'off', 'minimal', 'fast', 'high_quality'] as const).map((mode) => (
+                                            <TouchableOpacity
+                                                key={mode}
+                                                style={[
+                                                    styles.modeButton,
+                                                    settings.noiseReductionMode === mode && styles.modeButtonActive,
+                                                ]}
+                                                onPress={() => setSettings({ ...settings, noiseReductionMode: mode })}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.modeButtonText,
+                                                        settings.noiseReductionMode === mode && styles.modeButtonTextActive,
+                                                    ]}
+                                                >
+                                                    {mode === 'default' ? '自動' :
+                                                        mode === 'off' ? 'OFF' :
+                                                            mode === 'minimal' ? '最小' :
+                                                                mode === 'fast' ? '高速' : '高画質'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
+                                {/* Debug Button */}
+                                <View style={[styles.settingRow, { paddingTop: 8 }]}>
+                                    <TouchableOpacity
+                                        style={[styles.modeButton, { backgroundColor: '#333', paddingHorizontal: 16, flex: 0 }]}
+                                        onPress={() => debugCamera2Settings(true)}
+                                    >
+                                        <Text style={[styles.modeButtonText, { color: '#888' }]}>
+                                            🔍 設定を確認 (Debug)
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
                             </View>
 
                             {/* App Info Section */}
