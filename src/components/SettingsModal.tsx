@@ -116,6 +116,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             await applyCamera2Settings({
                 edgeMode: settings.edgeMode,
                 noiseReductionMode: settings.noiseReductionMode,
+                tonemapMode: settings.tonemapMode,
+                hdrMode: settings.hdrMode,
+                colorCorrectionMode: settings.colorCorrectionMode,
             });
             onSettingsChange(settings);
         }
@@ -394,17 +397,122 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                     </View>
                                 </View>
 
-                                {/* Debug Button */}
-                                <View style={[styles.settingRow, { paddingTop: 8 }]}>
-                                    <TouchableOpacity
-                                        style={[styles.modeButton, { backgroundColor: '#333', paddingHorizontal: 16, flex: 0 }]}
-                                        onPress={() => debugCamera2Settings(true)}
-                                    >
-                                        <Text style={[styles.modeButtonText, { color: '#888' }]}>
-                                            🔍 設定を確認 (Debug)
-                                        </Text>
-                                    </TouchableOpacity>
+                                {/* HDR Mode (Scene Mode) */}
+                                <View style={styles.settingRow}>
+                                    <Text style={styles.settingLabel}>HDRモード</Text>
+                                    <Text style={styles.toggleDescription}>シーンに合わせて自動調整</Text>
+                                    <View style={styles.modeSelector}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.modeButton,
+                                                !settings.hdrMode && styles.modeButtonActive,
+                                            ]}
+                                            onPress={() => setSettings({ ...settings, hdrMode: false })}
+                                        >
+                                            <Text style={[styles.modeButtonText, !settings.hdrMode && styles.modeButtonTextActive]}>
+                                                OFF
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.modeButton,
+                                                settings.hdrMode && styles.modeButtonActive,
+                                            ]}
+                                            onPress={() => setSettings({ ...settings, hdrMode: true })}
+                                        >
+                                            <Text style={[styles.modeButtonText, settings.hdrMode && styles.modeButtonTextActive]}>
+                                                ON
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
+
+                                {/* HDR Tonemapping (formerly DRO) */}
+                                <View style={styles.settingRow}>
+                                    <Text style={styles.settingLabel}>HDRトーンマッピング (DRO)</Text>
+                                    <Text style={styles.toggleDescription}>明暗差の調整 (Tonemap)</Text>
+                                    <View style={styles.modeSelector}>
+                                        {(['default', 'high_quality', 'fast'] as const).map((mode) => (
+                                            <TouchableOpacity
+                                                key={mode}
+                                                style={[
+                                                    styles.modeButton,
+                                                    settings.tonemapMode === mode && styles.modeButtonActive,
+                                                ]}
+                                                onPress={() => setSettings({ ...settings, tonemapMode: mode })}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.modeButtonText,
+                                                        settings.tonemapMode === mode && styles.modeButtonTextActive,
+                                                    ]}
+                                                >
+                                                    {mode === 'default' ? '自動' :
+                                                        mode === 'fast' ? '高速' : '高画質'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
+
+
+                                {/* FPS Control */}
+                                <View style={styles.settingRow}>
+                                    <Text style={styles.settingLabel}>フレームレート (FPS)</Text>
+                                    <View style={styles.modeSelector}>
+                                        {(['auto', '30', '60'] as const).map((mode) => (
+                                            <TouchableOpacity
+                                                key={mode}
+                                                style={[
+                                                    styles.modeButton,
+                                                    settings.targetFps === mode && styles.modeButtonActive,
+                                                ]}
+                                                onPress={() => setSettings({ ...settings, targetFps: mode })}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.modeButtonText,
+                                                        settings.targetFps === mode && styles.modeButtonTextActive,
+                                                    ]}
+                                                >
+                                                    {mode === 'auto' ? '自動/15-30' : mode + 'FPS'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+
+                                {/* Instant Record (Photo Priority) */}
+                                <View style={styles.settingRow}>
+                                    <Text style={styles.settingLabel}>インスタントビデオ (Instant Record)</Text>
+                                    <Text style={styles.toggleDescription}>ON: 即座に録画 / OFF: 明るさ優先 (写真モード)</Text>
+                                    <View style={styles.modeSelector}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.modeButton,
+                                                !settings.instantRecord && styles.modeButtonActive,
+                                            ]}
+                                            onPress={() => setSettings({ ...settings, instantRecord: false })}
+                                        >
+                                            <Text style={[styles.modeButtonText, !settings.instantRecord && styles.modeButtonTextActive]}>
+                                                OFF
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.modeButton,
+                                                settings.instantRecord && styles.modeButtonActive,
+                                            ]}
+                                            onPress={() => setSettings({ ...settings, instantRecord: true })}
+                                        >
+                                            <Text style={[styles.modeButtonText, settings.instantRecord && styles.modeButtonTextActive]}>
+                                                ON
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
                             </View>
 
                             {/* App Info Section */}

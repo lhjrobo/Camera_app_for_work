@@ -32,6 +32,11 @@ export interface AppSettings {
     // Camera2 API settings
     edgeMode: 'default' | 'off' | 'fast' | 'high_quality';
     noiseReductionMode: 'default' | 'off' | 'minimal' | 'fast' | 'high_quality';
+    tonemapMode: 'default' | 'contrast_curve' | 'fast' | 'high_quality' | 'gamma_value' | 'preset_curve';
+    hdrMode: boolean;
+    colorCorrectionMode: 'default' | 'fast' | 'high_quality' | 'transform_matrix';
+    targetFps: 'auto' | '30' | '60';
+    instantRecord: boolean;
 }
 
 export const getDefaultSettings = (): AppSettings => ({
@@ -44,6 +49,11 @@ export const getDefaultSettings = (): AppSettings => ({
     cameraModeMode: 'default',
     edgeMode: 'default',
     noiseReductionMode: 'default',
+    tonemapMode: 'default',
+    hdrMode: false,
+    colorCorrectionMode: 'default',
+    targetFps: 'auto',
+    instantRecord: true,
 });
 
 export const loadSettings = async (): Promise<AppSettings> => {

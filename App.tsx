@@ -145,6 +145,9 @@ const App = () => {
       await applyCamera2Settings({
         edgeMode: settings.edgeMode,
         noiseReductionMode: settings.noiseReductionMode,
+        tonemapMode: settings.tonemapMode,
+        hdrMode: settings.hdrMode,
+        colorCorrectionMode: settings.colorCorrectionMode,
       });
 
       setIsLoading(false);
@@ -246,6 +249,7 @@ const App = () => {
               initialCaptureMode={initialCaptureMode}
               initialFlashMode={initialFlashMode}
               initialCameraPosition={initialCameraPosition}
+              appSettings={appSettings}
             />
           )}
         </View>

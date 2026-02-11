@@ -23,7 +23,7 @@ import {
     AppStateStatus,
     BackHandler,
 } from 'react-native';
-import { Camera, useCameraDevice, useCameraDevices, useCodeScanner } from 'react-native-vision-camera';
+import { Camera, useCameraDevice, useCameraDevices, useCodeScanner, useCameraFormat } from 'react-native-vision-camera';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Reanimated, { useSharedValue, useAnimatedProps, runOnJS, withTiming, useAnimatedStyle } from 'react-native-reanimated';
 import KeyEvent from 'react-native-keyevent';
@@ -51,6 +51,7 @@ interface Props {
     initialCaptureMode?: 'photo' | 'video';
     initialFlashMode?: 'off' | 'on' | 'auto' | 'always';
     initialCameraPosition?: 'front' | 'back';
+    appSettings?: AppSettings | null;
 }
 
 const { ShutterModule } = NativeModules;
@@ -137,6 +138,7 @@ const CameraView: React.FC<Props> = ({
     initialCaptureMode = 'photo',
     initialFlashMode = 'off',
     initialCameraPosition = 'back',
+    appSettings,
 }) => {
     const isRoot = currentFolder.path === BASE_DIR;
     const insets = useSafeAreaInsets();
@@ -167,6 +169,21 @@ const CameraView: React.FC<Props> = ({
     const device = selectedDeviceId
         ? devices.find(d => d.id === selectedDeviceId)
         : defaultDevice;
+
+    // Format Selection based on FPS setting
+    const targetFps = appSettings?.targetFps ?? 'auto';
+    const targetFpsNum = targetFps === 'auto' ? 30 : Number(targetFps);
+
+    // Only use custom format if we are NOT in auto mode (i.e. forcing 60fps)
+    // For auto, we leave format as undefined to let Vision Camera pick the best native default (Max Res).
+    const customFormat = useCameraFormat(device, [
+        { fps: targetFpsNum },
+        { photoResolution: 'max' },
+        { videoResolution: 'max' },
+    ]);
+
+    const format = targetFps === 'auto' ? undefined : customFormat;
+    const fps = targetFps === 'auto' ? undefined : targetFpsNum;
 
     const [isRecording, setIsRecording] = useState(false);
     const [mode, setMode] = useState<'photo' | 'video'>(initialCaptureMode);
@@ -1067,10 +1084,12 @@ const CameraView: React.FC<Props> = ({
                                 ref={camera}
                                 style={styles.camera}
                                 device={device}
+                                format={format}
+                                fps={fps}
                                 isActive={isForeground && !showGallery}
                                 photo={true}
-                                video={true}
-                                audio={true}
+                                video={mode === 'video' || (appSettings?.instantRecord ?? true)}
+                                audio={mode === 'video' || (appSettings?.instantRecord ?? true)}
                                 torch={isForeground && cameraReady && flash === 'always' ? 'on' : 'off'}
                                 // codeScanner={codeScanner}
                                 animatedProps={animatedProps}
